@@ -12,7 +12,6 @@ Core service for downloading YouTube videos using yt-dlp with support for:
 import asyncio
 import logging
 import os
-import re
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Callable, Any
@@ -190,12 +189,9 @@ class YouTubeDownloader:
         """
         logger.info(f"Starting download for job {job_id}: {url}")
         
-        # Sanitize job_id for directory creation
-        safe_job_id = self._sanitize_job_id(job_id)
-        job_temp_dir = self.temp_dir / safe_job_id
-        
         try:
             # Create temporary download directory for this job
+            job_temp_dir = self.temp_dir / job_id
             job_temp_dir.mkdir(exist_ok=True)
             
             # First extract metadata
@@ -250,6 +246,9 @@ class YouTubeDownloader:
                         final_path = await self._store_file(file_path, job_id, "thumbnail")
                         thumbnail_path = final_path
             
+            # Clean up temporary directory
+            await self._cleanup_temp_directory(job_temp_dir)
+            
             result = DownloadResult(
                 success=True,
                 video_path=video_path,
@@ -264,15 +263,15 @@ class YouTubeDownloader:
         except Exception as e:
             logger.error(f"Download failed for job {job_id}: {str(e)}")
             
+            # Clean up on failure
+            job_temp_dir = self.temp_dir / job_id
+            if job_temp_dir.exists():
+                await self._cleanup_temp_directory(job_temp_dir)
+            
             return DownloadResult(
                 success=False,
                 error_message=str(e)
             )
-            
-        finally:
-            # Always clean up temporary directory
-            if job_temp_dir.exists():
-                await self._cleanup_temp_directory(job_temp_dir)
     
     def _configure_yt_dlp_options(
         self, 
@@ -321,38 +320,22 @@ class YouTubeDownloader:
         
         return ydl_opts
     
-    def _sanitize_job_id(self, job_id: str) -> str:
-        """Sanitize job ID to prevent path traversal attacks."""
-        # Remove any path traversal sequences and non-alphanumeric characters
-        # Keep only alphanumeric, hyphens, and underscores
-        sanitized = re.sub(r'[^a-zA-Z0-9_-]', '', job_id)
-        
-        # Ensure it's not empty after sanitization
-        if not sanitized:
-            sanitized = 'unknown'
-            
-        # Limit length to prevent excessively long paths
-        return sanitized[:50]
-    
     async def _store_file(self, file_path: Path, job_id: str, file_type: str) -> str:
         """Store downloaded file using the configured storage handler."""
-        
-        # Sanitize job ID to prevent path traversal
-        safe_job_id = self._sanitize_job_id(job_id)
         
         # Generate storage key based on file type
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         extension = file_path.suffix
         
         if file_type == "video":
-            storage_key = f"videos/{safe_job_id}/{timestamp}_video{extension}"
+            storage_key = f"videos/{job_id}/{timestamp}_video{extension}"
         elif file_type == "transcription":
             language = file_path.stem.split('.')[-1] if '.' in file_path.stem else 'en'
-            storage_key = f"transcriptions/{safe_job_id}/{timestamp}_{language}{extension}"
+            storage_key = f"transcriptions/{job_id}/{timestamp}_{language}{extension}"
         elif file_type == "thumbnail":
-            storage_key = f"thumbnails/{safe_job_id}/{timestamp}_thumbnail{extension}"
+            storage_key = f"thumbnails/{job_id}/{timestamp}_thumbnail{extension}"
         else:
-            storage_key = f"misc/{safe_job_id}/{timestamp}{extension}"
+            storage_key = f"misc/{job_id}/{timestamp}{extension}"
         
         # Store file
         with open(file_path, 'rb') as f:
