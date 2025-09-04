@@ -34,7 +34,7 @@ class DownloadJob(Base):
     title = Column(String)
     duration = Column(Integer)  # Duration in seconds
     channel_name = Column(String)
-    upload_date = Column(DateTime)
+    upload_date = Column(DateTime(timezone=True))
     view_count = Column(Integer)
     like_count = Column(Integer)
     
@@ -56,9 +56,9 @@ class DownloadJob(Base):
     audio_codec = Column(String)
     
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    started_at = Column(DateTime)
-    completed_at = Column(DateTime)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
     
     # Error handling
     error_message = Column(Text)
