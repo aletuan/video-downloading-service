@@ -1,8 +1,6 @@
 import asyncio
-import json
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Any
 
 from celery import Celery
 from sqlalchemy.orm import sessionmaker

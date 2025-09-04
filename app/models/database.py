@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float
 from sqlalchemy.ext.declarative import declarative_base
@@ -56,7 +56,7 @@ class DownloadJob(Base):
     audio_codec = Column(String)
     
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.utcnow(), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     started_at = Column(DateTime)
     completed_at = Column(DateTime)
     

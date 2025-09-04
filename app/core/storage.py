@@ -1,11 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Optional, Union, Dict, Any
-import os
+from typing import Optional, Dict, Any
 import asyncio
 from pathlib import Path
 import logging
-import shutil
-from urllib.parse import urljoin
 import aiofiles
 
 import boto3
@@ -213,6 +210,7 @@ class LocalStorageHandler(StorageHandler):
 
     async def get_file_url(self, file_path: str, expiry: int = 3600) -> Optional[str]:
         """Get a URL to access the file via HTTP."""
+        # Note: expiry parameter is ignored for local storage as URLs don't expire
         try:
             if not await self.file_exists(file_path):
                 return None
