@@ -1,0 +1,106 @@
+# Development Docker Compose override
+# Use with: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  # Development version of main application with enhanced development features
+  app:
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - TESTING=true
+      - DATABASE_URL=postgresql+asyncpg://postgres:password@db:5432/youtube_service
+      - REDIS_URL=redis://redis:6379/0
+      # Development-specific settings
+      - PYTHONPATH=/app
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Additional development mounts for live code editing
+      - ./app:/app/app
+      - ./tests:/app/tests
+      - ./scripts:/app/scripts
+      - ./pytest.ini:/app/pytest.ini
+      - ./requirements-dev.txt:/app/requirements-dev.txt
+      - ./htmlcov:/app/htmlcov  # Coverage reports accessible from host
+      - ./.coverage:/app/.coverage
+    # Override command to install dev dependencies on startup
+    command: >
+      bash -c "
+        echo 'Installing development dependencies...' &&
+        pip install --user -r requirements-dev.txt &&
+        echo 'Development environment ready!' &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+
+  # Development Celery worker with dev dependencies
+  celery-worker:
+    environment:
+      - ENVIRONMENT=development
+      - TESTING=true
+      - DATABASE_URL=postgresql+asyncpg://postgres:password@db:5432/youtube_service
+      - REDIS_URL=redis://redis:6379/0
+      - PYTHONPATH=/app
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Additional development mounts
+      - ./app:/app/app
+      - ./tests:/app/tests
+      - ./scripts:/app/scripts
+      - ./requirements-dev.txt:/app/requirements-dev.txt
+    # Install dev dependencies and start worker
+    command: >
+      bash -c "
+        echo 'Installing development dependencies for Celery worker...' &&
+        pip install --user -r requirements-dev.txt &&
+        echo 'Starting Celery worker in development mode...' &&
+        celery -A app.tasks.download_tasks worker --loglevel=info --concurrency=2
+      "
+
+  # Test runner service - dedicated container for running tests
+  test-runner:
+    build: .
+    environment:
+      - ENVIRONMENT=test
+      - DEBUG=false
+      - TESTING=true
+      - DATABASE_URL=sqlite+aiosqlite:///:memory:
+      - REDIS_URL=redis://redis:6379/1  # Use different Redis DB for tests
+      - PYTHONPATH=/app
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./app:/app/app
+      - ./tests:/app/tests
+      - ./scripts:/app/scripts
+      - ./pytest.ini:/app/pytest.ini
+      - ./requirements-dev.txt:/app/requirements-dev.txt
+      - ./htmlcov:/app/htmlcov
+      - ./.coverage:/app/.coverage
+    depends_on:
+      - redis
+    profiles:
+      - testing  # Only start when explicitly requested
+    command: >
+      bash -c "
+        echo 'Setting up test environment...' &&
+        pip install --user -r requirements-dev.txt &&
+        echo 'Test environment ready. Run: docker-compose exec test-runner python -m pytest' &&
+        tail -f /dev/null
+      "
+
+  # Database with development-specific settings
+  db:
+    environment:
+      - POSTGRES_DB=youtube_service
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      # Development database settings
+      - POSTGRES_INITDB_ARGS=--auth-host=trust
+    # Add volume for database initialization scripts
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+
+volumes:
+  postgres_data:

@@ -12,6 +12,9 @@ services:
     volumes:
       - ./downloads:/app/downloads
       - .env:/app/.env
+      - ./tests:/app/tests
+      - ./scripts:/app/scripts
+      - ./pytest.ini:/app/pytest.ini
     depends_on:
       - db
       - redis

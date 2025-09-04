@@ -155,17 +155,107 @@ video-downloading-service/
 └── Dockerfile               # Container definition
 ```
 
-### Running Tests
+### 🧪 Running Tests
+
+The project includes a comprehensive testing framework with automatic Docker integration for consistent testing environments.
+
+#### Quick Start
 
 ```bash
-# Unit tests
-python -m pytest tests/unit/
+# Automatic environment detection - runs in Docker if available
+./scripts/test.sh
 
-# Integration tests  
-python -m pytest tests/integration/
+# Run unit tests with HTML coverage report
+./scripts/test.sh unit --html
 
-# All tests with coverage
-python -m pytest --cov=app tests/
+# Run fast tests in parallel
+./scripts/test.sh fast --parallel --docker
+```
+
+#### 🐳 Docker Testing (Recommended)
+
+The testing framework automatically detects and uses Docker for consistent, isolated testing:
+
+```bash
+# One-time setup - configures Docker test environment
+python scripts/setup_test_env.py
+
+# Run tests with automatic Docker detection
+python scripts/test_runner.py --unit --html
+
+# Force Docker execution with environment setup
+python scripts/test_runner.py --docker --setup
+
+# Run in development mode with live code reloading
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+docker-compose exec app python -m pytest tests/unit --cov=app
+```
+
+#### 🔧 Local Testing
+
+If Docker is not available, tests can run in your local Python environment:
+
+```bash
+# Install test dependencies
+pip install -r requirements-dev.txt
+
+# Run tests locally
+python -m pytest tests/unit/ --cov=app --cov-report=html
+python scripts/test_runner.py --no-docker
+```
+
+#### 📊 Test Categories & Coverage
+
+| Test Type | Command | Description |
+|-----------|---------|-------------|
+| **Unit Tests** | `./scripts/test.sh unit` | Fast, isolated component tests |
+| **Integration Tests** | `./scripts/test.sh integration` | Service integration testing |
+| **Fast Tests** | `./scripts/test.sh fast` | Excludes slow/external tests |
+| **All Tests** | `./scripts/test.sh all` | Complete test suite |
+
+**Coverage Requirements**: 85% minimum coverage with detailed HTML reports
+
+#### 🛠️ Development Workflow
+
+```bash
+# Setup development environment
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+# Run tests with file watching (reruns on changes)
+python scripts/test_runner.py --watch
+
+# Generate coverage report only
+./scripts/test.sh coverage
+
+# Clean coverage data
+./scripts/test.sh clean
+
+# Verify environment setup
+python scripts/setup_test_env.py --verify-only
+```
+
+#### 📈 Coverage Reports
+
+After running tests with coverage, reports are available at:
+- **HTML Report**: `./htmlcov/index.html` (interactive, detailed)  
+- **XML Report**: `./coverage.xml` (CI/CD integration)
+- **Terminal**: Immediate coverage summary with missing lines
+
+#### 🔍 Troubleshooting Tests
+
+```bash
+# Check test environment status
+python scripts/setup_test_env.py --verify-only
+
+# Reset Docker test environment  
+python scripts/setup_test_env.py --clean
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+# Run specific test file
+python scripts/test_runner.py tests/unit/models/test_download.py --docker
+
+# Debug test failures
+python scripts/test_runner.py --verbose --stop-on-fail --docker
 ```
 
 ### Database Migrations
