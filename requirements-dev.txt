@@ -20,6 +20,7 @@ pre-commit==3.6.0
 watchdog==3.0.0
 
 # Database testing
+psycopg[binary]==3.1.12
 pytest-postgresql==5.0.0
 
 # Documentation
