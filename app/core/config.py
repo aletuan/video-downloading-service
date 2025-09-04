@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional
+from typing import Optional, List
 
 
 class Settings(BaseSettings):
@@ -27,9 +27,54 @@ class Settings(BaseSettings):
     max_concurrent_downloads: int = 3
     download_timeout: int = 3600
     
-    # YouTube
+    # YouTube Download Settings
     yt_dlp_update_check: bool = False
     extract_flat: bool = False
+    default_video_quality: str = "best"
+    default_audio_quality: str = "best"
+    default_subtitle_languages: List[str] = ["en"]
+    extract_thumbnails: bool = True
+    extract_subtitles: bool = True
+    extract_auto_subtitles: bool = True
+    
+    # Download Paths
+    temp_download_path: str = "/tmp/youtube_downloads"
+    
+    # Video Processing
+    default_video_format: str = "mp4"
+    default_audio_format: str = "mp3"
+    enable_format_conversion: bool = True
+    ffmpeg_quality_preset: str = "medium"  # ultrafast, fast, medium, slow, veryslow
+    max_video_resolution: Optional[str] = None  # "720p", "1080p", "1440p", "2160p"
+    
+    # Quality Presets
+    quality_presets: dict = {
+        "low": {
+            "video_bitrate": "1M",
+            "audio_bitrate": "96k",
+            "max_resolution": "720p"
+        },
+        "medium": {
+            "video_bitrate": "2M", 
+            "audio_bitrate": "128k",
+            "max_resolution": "1080p"
+        },
+        "high": {
+            "video_bitrate": "5M",
+            "audio_bitrate": "320k",
+            "max_resolution": "1440p"
+        },
+        "ultra": {
+            "video_bitrate": "10M",
+            "audio_bitrate": "320k",
+            "max_resolution": "2160p"
+        }
+    }
+    
+    # Retry Configuration
+    max_download_retries: int = 3
+    download_retry_delay: int = 60  # seconds
+    exponential_backoff: bool = True
     
     # Security
     secret_key: str = "your-secret-key-here-change-in-production"
