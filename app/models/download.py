@@ -1,8 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Literal
 from pydantic import BaseModel, Field, HttpUrl, validator
 from enum import Enum
 import uuid
+
+from app.core.validation import InputValidator, SecurityValidationMixin
 
 
 class DownloadStatus(str, Enum):
@@ -33,7 +35,7 @@ class OutputFormat(str, Enum):
     M4A = "m4a"  # Audio only
 
 
-class DownloadRequest(BaseModel):
+class DownloadRequest(BaseModel, SecurityValidationMixin):
     """Request model for initiating a download."""
     
     url: HttpUrl = Field(
@@ -70,17 +72,13 @@ class DownloadRequest(BaseModel):
     
     @validator('url')
     def validate_youtube_url(cls, v):
-        """Validate that the URL is from YouTube."""
+        """Validate YouTube URL using comprehensive validator."""
         url_str = str(v)
-        youtube_domains = [
-            'youtube.com', 'www.youtube.com', 'm.youtube.com',
-            'youtu.be', 'www.youtu.be'
-        ]
-        
-        if not any(domain in url_str for domain in youtube_domains):
-            raise ValueError('URL must be from YouTube')
-        
-        return v
+        try:
+            validation_result = InputValidator.validate_youtube_url(url_str)
+            return validation_result['canonical_url']
+        except ValueError as e:
+            raise ValueError(f'Invalid YouTube URL: {e}')
     
     @validator('subtitle_languages')
     def validate_subtitle_languages(cls, v):
@@ -88,12 +86,11 @@ class DownloadRequest(BaseModel):
         if not v:
             return ["en"]
         
-        # Basic validation for language codes (2-3 letter codes)
-        for lang in v:
-            if not isinstance(lang, str) or len(lang) < 2 or len(lang) > 5:
-                raise ValueError(f'Invalid language code: {lang}')
-        
-        return v
+        try:
+            validated_languages = InputValidator.validate_subtitle_languages(v)
+            return validated_languages or ["en"]
+        except ValueError as e:
+            raise ValueError(f'Invalid subtitle languages: {e}')
 
 
 class DownloadResponse(BaseModel):
@@ -121,7 +118,7 @@ class DownloadResponse(BaseModel):
     )
 
 
-class VideoMetadata(BaseModel):
+class VideoMetadata(BaseModel, SecurityValidationMixin):
     """Video metadata extracted from YouTube."""
     
     id: Optional[str] = None
@@ -285,7 +282,7 @@ class VideoInfo(BaseModel):
     )
 
 
-class ErrorResponse(BaseModel):
+class ErrorResponse(BaseModel, SecurityValidationMixin):
     """Standard error response model."""
     
     error: str = Field(
@@ -304,7 +301,7 @@ class ErrorResponse(BaseModel):
     )
     
     timestamp: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         description="Error timestamp"
     )
 
@@ -345,7 +342,7 @@ class WebSocketMessage(BaseModel):
     )
     
     timestamp: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         description="Message timestamp"
     )
 

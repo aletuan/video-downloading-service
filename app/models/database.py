@@ -56,7 +56,7 @@ class DownloadJob(Base):
     audio_codec = Column(String)
     
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.utcnow(), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     started_at = Column(DateTime)
     completed_at = Column(DateTime)
     
@@ -158,3 +158,99 @@ class DownloadJob(Base):
             'max_retries': self.max_retries,
             'can_retry': self.can_retry,
         }
+
+
+class APIKey(Base):
+    """
+    SQLAlchemy model for API key management.
+    
+    Stores hashed API keys with associated permissions and metadata
+    for authentication and authorization.
+    """
+    __tablename__ = "api_keys"
+    
+    # Primary key
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    
+    # API key information
+    name = Column(String, nullable=False, index=True)  # Human-readable name
+    key_hash = Column(String, nullable=False, unique=True, index=True)  # SHA-256 hash of API key
+    permission_level = Column(String, nullable=False, default="read_only")  # Permission level
+    
+    # Status and metadata
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    description = Column(Text)  # Optional description
+    
+    # Usage tracking
+    last_used_at = Column(DateTime(timezone=True))
+    usage_count = Column(Integer, nullable=False, default=0)
+    
+    # Rate limiting (optional override of default limits)
+    custom_rate_limit = Column(Integer)  # Custom requests per minute limit
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True))  # Optional expiration date
+    
+    # Metadata
+    created_by = Column(String)  # Who created this API key
+    notes = Column(Text)  # Additional notes
+    
+    def __repr__(self) -> str:
+        return f"<APIKey(id={self.id}, name={self.name}, permission={self.permission_level})>"
+    
+    def __str__(self) -> str:
+        return f"APIKey({self.name}): {self.permission_level} - {'Active' if self.is_active else 'Inactive'}"
+    
+    @property
+    def is_expired(self) -> bool:
+        """Check if the API key has expired."""
+        if not self.expires_at:
+            return False
+        return datetime.now(timezone.utc) > self.expires_at
+    
+    @property
+    def is_valid(self) -> bool:
+        """Check if the API key is valid (active and not expired)."""
+        return self.is_active and not self.is_expired
+    
+    @property
+    def days_until_expiry(self) -> Optional[int]:
+        """Get number of days until API key expires."""
+        if not self.expires_at:
+            return None
+        
+        delta = self.expires_at - datetime.now(timezone.utc)
+        return max(0, delta.days)
+    
+    def to_dict(self, include_sensitive: bool = False) -> dict:
+        """
+        Convert the model instance to a dictionary.
+        
+        Args:
+            include_sensitive: Whether to include sensitive information (key_hash)
+        """
+        data = {
+            'id': str(self.id),
+            'name': self.name,
+            'permission_level': self.permission_level,
+            'is_active': self.is_active,
+            'description': self.description,
+            'last_used_at': self.last_used_at.isoformat() if self.last_used_at else None,
+            'usage_count': self.usage_count,
+            'custom_rate_limit': self.custom_rate_limit,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'expires_at': self.expires_at.isoformat() if self.expires_at else None,
+            'created_by': self.created_by,
+            'notes': self.notes,
+            'is_expired': self.is_expired,
+            'is_valid': self.is_valid,
+            'days_until_expiry': self.days_until_expiry,
+        }
+        
+        if include_sensitive:
+            data['key_hash'] = self.key_hash
+        
+        return data
