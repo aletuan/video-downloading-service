@@ -17,6 +17,8 @@ The YouTube Video Download Service is a production-ready, cloud-native applicati
 - **🌩️ Smart Storage Management** - Auto-detects environment and routes to appropriate storage (Local/S3)
 - **⚡ Async Processing** - FastAPI with Celery for background job processing
 - **📊 Real-time Progress** - WebSocket support for live download status
+- **🔐 Enterprise Security** - API key authentication with permission-based access control
+- **🛡️ Rate Limiting** - Redis-based rate limiting with configurable limits
 - **🔍 Health Monitoring** - Comprehensive health checks for all system components
 - **🐳 Docker Ready** - Complete containerization for development and deployment
 
@@ -111,6 +113,9 @@ S3_CLOUDFRONT_DOMAIN=your-cloudfront-domain.amazonaws.com
 
 # Storage (automatically detected based on environment)
 DOWNLOAD_BASE_PATH=./downloads
+
+# Security (API keys required for production use)
+# Note: API keys are created via admin endpoints - see Authentication section
 ```
 
 ## 📚 API Documentation
@@ -119,26 +124,71 @@ Once running, access the interactive API documentation at:
 - **Swagger UI**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc
 
+## 🔐 Authentication
+
+The API uses **API key authentication** for secure access. All endpoints (except health checks) require a valid API key.
+
+### Permission Levels
+- **READ_ONLY**: Can access status, job listings, and video info endpoints
+- **DOWNLOAD**: Can create download jobs and access all read operations  
+- **ADMIN**: Can manage API keys and access all endpoints
+- **FULL_ACCESS**: Complete access to all functionality
+
+### API Key Usage
+
+Include the API key in requests using any of these methods:
+
+1. **Header (Recommended)**: `X-API-Key: your-api-key`
+2. **Query Parameter**: `?api_key=your-api-key`
+3. **Bearer Token**: `Authorization: Bearer your-api-key`
+
+### Creating API Keys
+
+API keys must be created through the admin endpoints or directly in the database:
+
+```bash
+# Create an API key via admin endpoint (requires existing admin key)
+curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
+     -H "Content-Type: application/json" \
+     -H "X-API-Key: admin-api-key" \
+     -d '{
+       "name": "My Application Key",
+       "permission_level": "download",
+       "description": "API key for my application"
+     }'
+```
+
 ### Key Endpoints
 
-- `POST /api/v1/download` - Start a new download job
-- `GET /api/v1/status/{job_id}` - Get job status and details
-- `GET /api/v1/jobs` - List all download jobs with pagination
-- `GET /api/v1/info?url={youtube_url}` - Extract video information without downloading
-- `POST /api/v1/retry/{job_id}` - Retry a failed download job
+#### Public Endpoints (No Authentication)
 - `GET /health` - Basic health check
 - `GET /health/detailed` - Comprehensive system health
-- `WS /ws/progress/{job_id}` - WebSocket for real-time progress updates
+- `GET /api/v1/info?url={youtube_url}` - Extract video information without downloading
+
+#### Protected Endpoints (Require Authentication)
+- `POST /api/v1/download` - Start a new download job (DOWNLOAD permission required)
+- `GET /api/v1/status/{job_id}` - Get job status and details (READ_ONLY permission required)
+- `GET /api/v1/jobs` - List all download jobs with pagination (READ_ONLY permission required) 
+- `POST /api/v1/retry/{job_id}` - Retry a failed download job (DOWNLOAD permission required)
+- `WS /ws/progress/{job_id}?api_key={key}` - WebSocket for real-time progress updates
+
+#### Admin Endpoints (ADMIN Permission Required)
+- `POST /api/v1/admin/api-keys` - Create new API key
+- `GET /api/v1/admin/api-keys` - List all API keys
+- `GET /api/v1/admin/api-keys/{key_id}` - Get specific API key details
+- `PUT /api/v1/admin/api-keys/{key_id}` - Update API key
+- `DELETE /api/v1/admin/api-keys/{key_id}` - Delete API key
 
 ### Example Usage
 
 ```bash
-# Extract video information
+# Extract video information (public endpoint)
 curl "http://localhost:8000/api/v1/info?url=https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
-# Start a download with options
+# Start a download with authentication
 curl -X POST "http://localhost:8000/api/v1/download" \
      -H "Content-Type: application/json" \
+     -H "X-API-Key: your-api-key-here" \
      -d '{
        "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
        "quality": "720p",
@@ -147,14 +197,32 @@ curl -X POST "http://localhost:8000/api/v1/download" \
        "subtitle_languages": ["en"]
      }'
 
-# Check job status
-curl "http://localhost:8000/api/v1/status/{job_id}"
+# Check job status with API key
+curl -H "X-API-Key: your-api-key-here" \
+     "http://localhost:8000/api/v1/status/{job_id}"
 
-# List all jobs with filtering
-curl "http://localhost:8000/api/v1/jobs?status=completed&page=1&per_page=10"
+# List all jobs with filtering and authentication
+curl -H "X-API-Key: your-api-key-here" \
+     "http://localhost:8000/api/v1/jobs?status=completed&page=1&per_page=10"
 
-# Retry a failed job
-curl -X POST "http://localhost:8000/api/v1/retry/{job_id}"
+# Retry a failed job with authentication
+curl -X POST \
+     -H "X-API-Key: your-api-key-here" \
+     "http://localhost:8000/api/v1/retry/{job_id}"
+
+# Connect to WebSocket with authentication
+wscat -c "ws://localhost:8000/ws/progress/{job_id}?api_key=your-api-key-here"
+
+# Admin: Create a new API key
+curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
+     -H "Content-Type: application/json" \
+     -H "X-API-Key: admin-api-key-here" \
+     -d '{
+       "name": "Development Key",
+       "permission_level": "download",
+       "description": "API key for development testing",
+       "expires_at": "2024-12-31T23:59:59Z"
+     }'
 ```
 
 ## 🛠️ Development
@@ -204,6 +272,46 @@ docker compose exec app alembic revision --autogenerate -m "Description"
 alembic upgrade head
 alembic revision --autogenerate -m "Description"
 alembic downgrade -1
+```
+
+### 🔐 Security Development
+
+The service includes comprehensive security features:
+
+```bash
+# Create initial admin API key (run once after setup)
+docker compose exec app python -c "
+import asyncio
+from app.core.auth import APIKeyGenerator
+from app.models.database import APIKey
+from app.core.database import get_db_session
+from datetime import datetime, timezone
+
+async def create_admin_key():
+    api_key = APIKeyGenerator.generate_api_key()
+    api_key_hash = APIKeyGenerator.hash_api_key(api_key)
+    print(f'Admin API Key: {api_key}')
+    
+    async with get_db_session() as session:
+        admin_key = APIKey(
+            name='Admin Key',
+            key_hash=api_key_hash,
+            permission_level='admin',
+            is_active=True,
+            description='Initial admin API key',
+            usage_count=0,
+            created_by='system',
+            created_at=datetime.now(timezone.utc)
+        )
+        session.add(admin_key)
+        await session.commit()
+        print('Admin key created successfully')
+
+asyncio.run(create_admin_key())
+"
+
+# Test authentication
+curl -H "X-API-Key: your-admin-key-here" http://localhost:8000/api/v1/admin/api-keys
 ```
 
 ## 🔍 Monitoring & Health Checks
@@ -277,11 +385,18 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - WebSocket real-time updates
 - Background job processing with Celery
 
-### Phase 3: 📊 Advanced Features (Next)
+### Phase 4: ✅ Authentication & Security (COMPLETED)
+- API key authentication with permission levels
+- Rate limiting with Redis
+- Security middleware and headers
+- Input validation and sanitization
+- Admin API for key management
+
+### Phase 5: 📊 Advanced Features (Next)
 - Batch download capabilities
 - Playlist support  
 - Advanced metadata extraction
-- User management and authentication
+- User management and multi-tenancy
 - Download scheduling and webhooks
 
 See [TASKS.md](docs/TASKS.md) for detailed development progress.

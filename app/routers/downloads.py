@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 import uuid
 import logging
@@ -10,6 +10,11 @@ from sqlalchemy import select, desc, func
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
+from app.core.auth import (
+    require_authentication,
+    require_permission,
+    APIKeyPermission
+)
 from app.models.database import DownloadJob
 from app.models.download import (
     DownloadRequest, DownloadResponse, DownloadJobStatus, DownloadJobList,
@@ -38,7 +43,8 @@ router = APIRouter()
 async def start_download(
     request: DownloadRequest,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    api_key_info: dict = Depends(require_permission(APIKeyPermission.DOWNLOAD))
 ):
     """
     Start a new YouTube video download.
@@ -68,7 +74,7 @@ async def start_download(
             audio_only=request.audio_only,
             output_format=request.output_format.value,
             subtitle_languages=",".join(request.subtitle_languages),
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         
         db.add(download_job)
@@ -118,7 +124,8 @@ async def start_download(
 )
 async def get_job_status(
     job_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    api_key_info: dict = Depends(require_permission(APIKeyPermission.READ_ONLY))
 ):
     """
     Get the status of a specific download job.
@@ -189,7 +196,8 @@ async def list_jobs(
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(10, ge=1, le=100, description="Jobs per page"),
     status: Optional[DownloadStatus] = Query(None, description="Filter by status"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    api_key_info: dict = Depends(require_permission(APIKeyPermission.READ_ONLY))
 ):
     """
     List download jobs with pagination and filtering.
@@ -353,7 +361,8 @@ async def get_video_info(
 async def retry_download(
     job_id: str,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    api_key_info: dict = Depends(require_permission(APIKeyPermission.DOWNLOAD))
 ):
     """
     Retry a failed download job.

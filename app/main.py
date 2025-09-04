@@ -1,17 +1,18 @@
 from contextlib import asynccontextmanager
 import logging
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Depends
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 from app.core.config import settings
 from app.core.database import init_database, close_database, db_manager
 from app.core.storage import init_storage, health_check_storage
+from app.core.security_middleware import add_security_middleware
+from app.core.auth import require_authentication
 
 # Import routers
-from app.routers import downloads, websocket
+from app.routers import downloads, websocket, admin
 
 # Configure logging
 logging.basicConfig(
@@ -64,14 +65,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"] if settings.debug else ["https://yourdomain.com"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Security middleware (includes CORS, authentication, rate limiting, security headers)
+add_security_middleware(app, debug_mode=settings.debug)
 
 # Health check endpoints
 @app.get("/health")
@@ -120,6 +115,7 @@ async def detailed_health_check():
             "error": str(e)
         }
 
+
 # Static file serving for local storage
 if settings.environment == "localhost":
     downloads_path = Path(settings.download_base_path).resolve()
@@ -130,6 +126,7 @@ if settings.environment == "localhost":
 # Include routers
 app.include_router(downloads.router, prefix="/api/v1", tags=["downloads"])
 app.include_router(websocket.router, prefix="/ws", tags=["websocket"])
+app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 
 if __name__ == "__main__":
     import uvicorn

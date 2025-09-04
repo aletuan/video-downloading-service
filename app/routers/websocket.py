@@ -4,11 +4,12 @@ import logging
 from typing import Dict, Set
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.database import get_db
+from app.core.auth import APIKeyGenerator, validate_api_key
 from app.models.database import DownloadJob
 from app.models.download import ProgressMessage, StatusMessage, ErrorMessage, JobProgress, DownloadStatus
 
@@ -138,7 +139,8 @@ ws_manager = WebSocketManager()
 @router.websocket("/progress/{job_id}")
 async def websocket_progress_endpoint(
     websocket: WebSocket, 
-    job_id: str
+    job_id: str,
+    api_key: str = Query(..., description="API key for authentication")
 ):
     """
     WebSocket endpoint for receiving real-time progress updates for a download job.
@@ -178,6 +180,28 @@ async def websocket_progress_endpoint(
     }
     """
     try:
+        # Authenticate API key before establishing WebSocket connection
+        api_key_info = await validate_api_key(api_key)
+        if not api_key_info:
+            await websocket.close(code=4001, reason="Invalid API key")
+            return
+        
+        # Check if user has READ_ONLY permission or higher
+        permission_level = api_key_info["permission_level"]
+        from app.core.auth import APIKeyPermission
+        
+        allowed_permissions = [
+            APIKeyPermission.READ_ONLY,
+            APIKeyPermission.DOWNLOAD,
+            APIKeyPermission.ADMIN,
+            APIKeyPermission.FULL_ACCESS
+        ]
+        
+        if permission_level not in allowed_permissions:
+            await websocket.close(code=4003, reason="Insufficient permissions")
+            return
+        
+        # Authentication successful, proceed with connection
         await ws_manager.connect(websocket, job_id)
         
         # Keep connection alive and handle messages

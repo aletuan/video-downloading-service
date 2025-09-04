@@ -102,9 +102,9 @@ async def init_database() -> None:
             expire_on_commit=False
         )
         
-        # Create database tables using async engine
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        # Skip table creation - handled by Alembic migrations
+        # async with engine.begin() as conn:
+        #     await conn.run_sync(Base.metadata.create_all)
         
         logger.info("Async database initialized successfully for FastAPI")
         
@@ -127,8 +127,8 @@ def init_sync_database_only() -> None:
             expire_on_commit=False
         )
         
-        # Create tables using sync engine
-        Base.metadata.create_all(sync_engine)
+        # Skip table creation - handled by Alembic migrations
+        # Base.metadata.create_all(sync_engine)
         
         logger.info("Sync database initialized successfully for Celery worker")
         
