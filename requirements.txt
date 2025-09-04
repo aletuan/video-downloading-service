@@ -3,7 +3,7 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 
 # YouTube Downloader
-yt-dlp==2023.10.13
+yt-dlp>=2025.8.27
 
 # AWS Integration
 boto3==1.29.7
