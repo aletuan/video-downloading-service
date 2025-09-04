@@ -68,20 +68,22 @@ The YouTube Video Download Service is a production-ready, cloud-native applicati
 
 3. **Start with Docker (Recommended):**
    ```bash
-   docker-compose up -d
+   docker compose up -d --build
    ```
 
 4. **Or run locally:**
    ```bash
    # Install dependencies
    pip install -r requirements.txt
-   pip install -r requirements-dev.txt
    
    # Run database migrations
    alembic upgrade head
    
-   # Start services
+   # Start services (requires PostgreSQL and Redis running)
+   # Terminal 1: FastAPI app
    uvicorn app.main:app --reload --port 8000
+   
+   # Terminal 2: Celery worker
    celery -A app.tasks.download_tasks worker --loglevel=info
    ```
 
@@ -90,21 +92,25 @@ The YouTube Video Download Service is a production-ready, cloud-native applicati
 Key environment variables in `.env`:
 
 ```env
-# Database
-DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5433/youtube_service
+# Environment
+ENVIRONMENT=localhost  # or 'aws' for production
+DEBUG=true
 
-# Redis
-REDIS_URL=redis://localhost:6380/0
+# Database (Docker uses these defaults)
+DATABASE_URL=postgresql+asyncpg://user:password@db:5432/youtube_service
 
-# AWS (for S3 storage)
+# Redis (Docker uses these defaults)
+REDIS_URL=redis://redis:6379/0
+
+# AWS (for S3 storage when ENVIRONMENT=aws)
 AWS_ACCESS_KEY_ID=your_access_key
 AWS_SECRET_ACCESS_KEY=your_secret_key
 AWS_REGION=us-east-1
 S3_BUCKET_NAME=your-bucket
+S3_CLOUDFRONT_DOMAIN=your-cloudfront-domain.amazonaws.com
 
-# Storage
-STORAGE_TYPE=local  # or 's3'
-LOCAL_STORAGE_PATH=./downloads
+# Storage (automatically detected based on environment)
+DOWNLOAD_BASE_PATH=./downloads
 ```
 
 ## 📚 API Documentation
@@ -116,21 +122,39 @@ Once running, access the interactive API documentation at:
 ### Key Endpoints
 
 - `POST /api/v1/download` - Start a new download job
-- `GET /api/v1/jobs/{job_id}` - Get job status and details
-- `GET /api/v1/jobs` - List all download jobs
+- `GET /api/v1/status/{job_id}` - Get job status and details
+- `GET /api/v1/jobs` - List all download jobs with pagination
+- `GET /api/v1/info?url={youtube_url}` - Extract video information without downloading
+- `POST /api/v1/retry/{job_id}` - Retry a failed download job
 - `GET /health` - Basic health check
 - `GET /health/detailed` - Comprehensive system health
+- `WS /ws/progress/{job_id}` - WebSocket for real-time progress updates
 
 ### Example Usage
 
 ```bash
-# Start a download
+# Extract video information
+curl "http://localhost:8000/api/v1/info?url=https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+# Start a download with options
 curl -X POST "http://localhost:8000/api/v1/download" \
      -H "Content-Type: application/json" \
-     -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
+     -d '{
+       "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+       "quality": "720p",
+       "output_format": "mp4",
+       "include_transcription": true,
+       "subtitle_languages": ["en"]
+     }'
 
 # Check job status
-curl "http://localhost:8000/api/v1/jobs/{job_id}"
+curl "http://localhost:8000/api/v1/status/{job_id}"
+
+# List all jobs with filtering
+curl "http://localhost:8000/api/v1/jobs?status=completed&page=1&per_page=10"
+
+# Retry a failed job
+curl -X POST "http://localhost:8000/api/v1/retry/{job_id}"
 ```
 
 ## 🛠️ Development
@@ -158,26 +182,27 @@ video-downloading-service/
 ### Running Tests
 
 ```bash
-# Unit tests
+# Inside Docker container
+docker compose exec app pytest tests/unit/
+docker compose exec app pytest tests/integration/
+docker compose exec app pytest --cov=app tests/
+
+# Local development
 python -m pytest tests/unit/
-
-# Integration tests  
 python -m pytest tests/integration/
-
-# All tests with coverage
 python -m pytest --cov=app tests/
 ```
 
 ### Database Migrations
 
 ```bash
-# Create new migration
-alembic revision --autogenerate -m "Description"
+# Inside Docker container
+docker compose exec app alembic upgrade head
+docker compose exec app alembic revision --autogenerate -m "Description"
 
-# Apply migrations
+# Local development
 alembic upgrade head
-
-# Rollback
+alembic revision --autogenerate -m "Description"
 alembic downgrade -1
 ```
 
@@ -187,10 +212,18 @@ The service includes comprehensive health monitoring:
 
 - **Basic Health**: `GET /health` - Simple status check
 - **Detailed Health**: `GET /health/detailed` - Full system validation including:
-  - Database connectivity
-  - Redis connectivity  
-  - Storage handler status
-  - Celery worker status
+  - Database connectivity and version
+  - Storage handler read/write validation (Local/S3)
+  - System environment detection
+
+```bash
+# Test health endpoints
+curl http://localhost:8000/health
+curl http://localhost:8000/health/detailed | jq .
+
+# Test Celery worker
+docker compose exec celery-worker celery -A app.tasks.download_tasks inspect ping
+```
 
 ## 🚢 Deployment
 
@@ -237,14 +270,18 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Storage abstraction (Local/S3)
 - Docker development environment
 
-### Phase 2: 🎯 Core Download Engine (Next)
-- YouTube downloader implementation
+### Phase 2: ✅ Core Download Engine (COMPLETED)
+- YouTube downloader implementation with yt-dlp
 - Format selection and quality options
 - Progress tracking and error handling
+- WebSocket real-time updates
+- Background job processing with Celery
 
-### Phase 3: 📊 Advanced Features
+### Phase 3: 📊 Advanced Features (Next)
 - Batch download capabilities
-- Playlist support
+- Playlist support  
 - Advanced metadata extraction
+- User management and authentication
+- Download scheduling and webhooks
 
 See [TASKS.md](docs/TASKS.md) for detailed development progress.

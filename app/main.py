@@ -3,13 +3,15 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 from app.core.config import settings
 from app.core.database import init_database, close_database, db_manager
 from app.core.storage import init_storage, health_check_storage
 
-# Import routers (will be implemented later)
-# from app.routers import downloads, health, websocket
+# Import routers
+from app.routers import downloads, websocket
 
 # Configure logging
 logging.basicConfig(
@@ -118,10 +120,16 @@ async def detailed_health_check():
             "error": str(e)
         }
 
-# Include routers (commented out until implemented)
-# app.include_router(downloads.router, prefix="/api/v1", tags=["downloads"])
-# app.include_router(health.router, prefix="/api/v1", tags=["health"])
-# app.include_router(websocket.router, prefix="/ws", tags=["websocket"])
+# Static file serving for local storage
+if settings.environment == "localhost":
+    downloads_path = Path(settings.download_base_path).resolve()
+    downloads_path.mkdir(parents=True, exist_ok=True)
+    app.mount("/files", StaticFiles(directory=str(downloads_path)), name="files")
+    logger.info(f"Static file serving enabled at /files -> {downloads_path}")
+
+# Include routers
+app.include_router(downloads.router, prefix="/api/v1", tags=["downloads"])
+app.include_router(websocket.router, prefix="/ws", tags=["websocket"])
 
 if __name__ == "__main__":
     import uvicorn
