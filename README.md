@@ -121,8 +121,8 @@ DOWNLOAD_BASE_PATH=./downloads
 ## 📚 API Documentation
 
 Once running, access the interactive API documentation at:
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
+- **Swagger UI**: http://localhost:8000/api/docs
+- **ReDoc**: http://localhost:8000/api/redoc
 
 ## 🔐 Authentication
 
