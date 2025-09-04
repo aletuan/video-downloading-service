@@ -5,10 +5,10 @@ This directory contains utility scripts for the YouTube Download Service project
 ## Available Scripts
 
 - ✅ `create_admin_key.py` - **IMPLEMENTED** - Create initial admin API key for authentication
+- ✅ `setup_dev.py` - **IMPLEMENTED** - Complete development environment setup with cleanup
 
 ## Planned Scripts (To Be Implemented)
 
-- `setup_dev.py` - Development environment setup script (automate full environment setup)
 - `seed_data.py` - Database seeding script for development testing
 - `migration_helper.py` - Database migration utilities and helpers
 - `deploy.sh` - Deployment automation and helper script
@@ -21,6 +21,33 @@ This directory is prepared for future utility scripts. Scripts will be added as 
 ## Usage
 
 Run scripts from the project root directory:
+
+### setup_dev.py
+
+Complete development environment setup with optional cleanup:
+
+```bash
+# Basic setup (recommended for first time)
+python scripts/setup_dev.py
+
+# Full reset - clean everything and setup fresh
+python scripts/setup_dev.py --clean-all
+
+# Clean containers only (keeps Docker images for faster rebuilds)
+python scripts/setup_dev.py --clean-containers
+
+# Quick start without rebuilding (if containers already exist)
+python scripts/setup_dev.py --no-build
+
+# Setup without creating admin API key
+python scripts/setup_dev.py --skip-key
+
+# Custom admin key name
+python scripts/setup_dev.py --admin-key-name "My Development Admin"
+
+# Show all options
+python scripts/setup_dev.py --help
+```
 
 ### create_admin_key.py
 
