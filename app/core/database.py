@@ -1,9 +1,9 @@
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Generator, Optional
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, AsyncEngine, async_sessionmaker
-from sqlalchemy.pool import StaticPool
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import text
-from contextlib import asynccontextmanager
+from sqlalchemy import create_engine, Engine, text
+from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.pool import StaticPool, NullPool
+from contextlib import asynccontextmanager, contextmanager
 import logging
 
 from app.core.config import settings
@@ -11,9 +11,17 @@ from app.models.database import Base
 
 logger = logging.getLogger(__name__)
 
-# Global variables for database engine and session factory
+# Global variables for both async and sync database engines
 engine: Optional[AsyncEngine] = None
+sync_engine: Optional[Engine] = None
 async_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
+sync_session_factory: Optional[sessionmaker[Session]] = None
+
+def get_sync_database_url(async_url: str) -> str:
+    """Convert async database URL to sync version for Celery tasks."""
+    return (async_url
+            .replace("sqlite+aiosqlite://", "sqlite://")
+            .replace("postgresql+asyncpg://", "postgresql+psycopg2://"))
 
 
 def create_database_engine() -> AsyncEngine:
@@ -46,45 +54,111 @@ def create_database_engine() -> AsyncEngine:
     return create_async_engine(settings.database_url, **engine_kwargs)
 
 
+def create_sync_database_engine() -> Engine:
+    """Create and configure the sync database engine for Celery tasks."""
+    
+    sync_url = get_sync_database_url(settings.database_url)
+    
+    # Engine configuration based on database type
+    engine_kwargs = {
+        "echo": settings.debug,
+        "future": True,
+    }
+    
+    # SQLite-specific configuration
+    if "sqlite" in sync_url:
+        engine_kwargs.update({
+            "poolclass": StaticPool,
+            "connect_args": {
+                "check_same_thread": False,
+                "timeout": 20,
+            },
+        })
+    # PostgreSQL-specific configuration for Celery
+    else:
+        # Use NullPool to avoid connection sharing issues between processes
+        # but don't set pool_size/max_overflow as they're not compatible with NullPool
+        engine_kwargs.update({
+            "poolclass": NullPool,
+            "pool_pre_ping": True,
+            "pool_recycle": 3600,
+        })
+    
+    return create_engine(sync_url, **engine_kwargs)
+
+
 async def init_database() -> None:
-    """Initialize the database connection and create tables."""
+    """Initialize async database connection for FastAPI and create tables."""
     global engine, async_session_factory
     
     try:
-        # Create database engine
+        # Create async database engine for FastAPI
         engine = create_database_engine()
         
-        # Create session factory
+        # Create async session factory
         async_session_factory = async_sessionmaker(
             engine,
             class_=AsyncSession,
             expire_on_commit=False
         )
         
-        # Create database tables
+        # Create database tables using async engine
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         
-        logger.info("Database initialized successfully")
+        logger.info("Async database initialized successfully for FastAPI")
         
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
+        logger.error(f"Failed to initialize async database: {e}")
+        raise
+
+
+def init_sync_database_only() -> None:
+    """Initialize only sync database for Celery workers."""
+    global sync_engine, sync_session_factory
+    
+    try:
+        # Create sync database engine for Celery tasks
+        sync_engine = create_sync_database_engine()
+        
+        # Create session factory
+        sync_session_factory = sessionmaker(
+            sync_engine,
+            expire_on_commit=False
+        )
+        
+        # Create tables using sync engine
+        Base.metadata.create_all(sync_engine)
+        
+        logger.info("Sync database initialized successfully for Celery worker")
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize sync database: {e}")
         raise
 
 
 async def close_database() -> None:
-    """Close the database connection."""
+    """Close async database connection."""
     global engine
     
     if engine:
         await engine.dispose()
-        logger.info("Database connection closed")
+        logger.info("Async database connection closed")
+
+
+def close_sync_database() -> None:
+    """Close sync database connection for Celery workers."""
+    global sync_engine
+    
+    if sync_engine:
+        sync_engine.dispose()
+        logger.info("Sync database connection closed")
 
 
 @asynccontextmanager
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     """
-    Get an async database session.
+    Get an async database session for FastAPI endpoints.
     
     Usage:
         async with get_db_session() as session:
@@ -92,7 +166,7 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             result = await session.execute(...)
     """
     if not async_session_factory:
-        raise RuntimeError("Database not initialized. Call init_database() first.")
+        raise RuntimeError("Async database not initialized. Call init_database() first.")
     
     async with async_session_factory() as session:
         try:
@@ -100,10 +174,35 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             await session.commit()
         except Exception as e:
             await session.rollback()
-            logger.error(f"Database session error: {e}")
+            logger.error(f"Async database session error: {e}")
             raise
         finally:
             await session.close()
+
+
+@contextmanager
+def get_sync_db_session() -> Generator[Session, None, None]:
+    """
+    Get a sync database session for Celery tasks.
+    
+    Usage:
+        with get_sync_db_session() as session:
+            # Use session here
+            result = session.execute(...)
+    """
+    if not sync_session_factory:
+        raise RuntimeError("Sync database not initialized. Call init_sync_database_only() first.")
+    
+    with sync_session_factory() as session:
+        try:
+            yield session
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Sync database session error: {e}")
+            raise
+        finally:
+            session.close()
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -121,7 +220,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def check_database_connection() -> bool:
     """
-    Check if the database connection is healthy.
+    Check if the async database connection is healthy.
     
     Returns:
         bool: True if connection is healthy, False otherwise
@@ -134,7 +233,26 @@ async def check_database_connection() -> bool:
             await conn.execute(text("SELECT 1"))
         return True
     except Exception as e:
-        logger.error(f"Database health check failed: {e}")
+        logger.error(f"Async database health check failed: {e}")
+        return False
+
+
+def check_sync_database_connection() -> bool:
+    """
+    Check if the sync database connection is healthy.
+    
+    Returns:
+        bool: True if connection is healthy, False otherwise
+    """
+    if not sync_engine:
+        return False
+    
+    try:
+        with sync_engine.begin() as conn:
+            conn.execute(text("SELECT 1"))
+        return True
+    except Exception as e:
+        logger.error(f"Sync database health check failed: {e}")
         return False
 
 

@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Union, Any, Callable
 import uuid
 import json
 
+import aiofiles
 import yt_dlp
 from yt_dlp.utils import DownloadError, ExtractorError
 
@@ -399,7 +400,7 @@ class YouTubeDownloader:
                 storage_path = f"downloads/{job_id}/{primary_file.name}"
                 
                 # Read and upload file
-                async with open(primary_file, 'rb') as f:
+                async with aiofiles.open(primary_file, 'rb') as f:
                     content = await f.read()
                 
                 success = await self.storage.save_file(storage_path, content)
@@ -417,8 +418,8 @@ class YouTubeDownloader:
                 thumbnail_file = Path(file_info['thumbnail_file'])
                 storage_path = f"downloads/{job_id}/thumbnail{thumbnail_file.suffix}"
                 
-                with open(thumbnail_file, 'rb') as f:
-                    content = f.read()
+                async with aiofiles.open(thumbnail_file, 'rb') as f:
+                    content = await f.read()
                 
                 success = await self.storage.save_file(storage_path, content)
                 if success:
@@ -431,8 +432,8 @@ class YouTubeDownloader:
                     subtitle_file = Path(subtitle_file_path)
                     storage_path = f"downloads/{job_id}/subtitles/{subtitle_file.name}"
                     
-                    with open(subtitle_file, 'rb') as f:
-                        content = f.read()
+                    async with aiofiles.open(subtitle_file, 'rb') as f:
+                        content = await f.read()
                     
                     success = await self.storage.save_file(storage_path, content)
                     if success:
