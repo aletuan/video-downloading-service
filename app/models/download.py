@@ -10,7 +10,7 @@ from enum import Enum
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field, validator, root_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class VideoQuality(str, Enum):
@@ -69,7 +69,8 @@ class DownloadRequest(BaseModel):
     subtitle_languages: List[str] = Field(["en"], description="Preferred subtitle languages")
     extract_thumbnail: bool = Field(True, description="Extract video thumbnail")
     
-    @validator('url')
+    @field_validator('url')
+    @classmethod
     def validate_youtube_url(cls, v):
         """Validate that the URL is a YouTube URL."""
         if not v:
@@ -86,7 +87,8 @@ class DownloadRequest(BaseModel):
         
         return v
     
-    @validator('subtitle_languages')
+    @field_validator('subtitle_languages')
+    @classmethod
     def validate_subtitle_languages(cls, v):
         """Validate subtitle language codes."""
         if not v:
@@ -104,17 +106,14 @@ class DownloadRequest(BaseModel):
         
         return [lang.lower() for lang in v]
     
-    @root_validator
-    def validate_audio_only_format(cls, values):
+    @model_validator(mode='after')
+    def validate_audio_only_format(self):
         """Ensure audio-only downloads use audio format."""
-        audio_only = values.get('audio_only', False)
-        output_format = values.get('output_format')
-        
-        if audio_only and output_format not in [VideoFormat.MP4, VideoFormat.WEBM]:
+        if self.audio_only and self.output_format not in [VideoFormat.MP4, VideoFormat.WEBM]:
             # For audio-only, we'll convert to audio format in the service
             pass
         
-        return values
+        return self
 
 
 class TranscriptionFileInfo(BaseModel):
