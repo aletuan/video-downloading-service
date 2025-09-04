@@ -34,7 +34,6 @@ Examples:
 import sys
 import os
 import subprocess
-import asyncio
 import argparse
 import time
 from pathlib import Path
@@ -310,46 +309,54 @@ def verify_services():
             print_error(f"{service_name}: Timeout")
 
 
-async def create_admin_key(admin_key_name: str) -> Optional[str]:
-    """Create admin API key using the create_admin_key script."""
+def create_admin_key_via_docker(admin_key_name: str) -> Optional[str]:
+    """Create admin API key using the create_admin_key script inside Docker."""
     print_step("API-KEY", "Creating admin API key")
     
     try:
-        # Import here to avoid import issues
-        from app.core.auth import APIKeyGenerator
-        from app.models.database import APIKey
-        from app.core.database import get_db_session, init_database
-        from datetime import datetime, timezone
+        # Use the create_admin_key.py script inside the Docker container
+        command = f'docker compose exec -T app python scripts/create_admin_key.py --name "{admin_key_name}" --description "Development admin key created by setup_dev.py" --force'
         
-        # Initialize database
-        await init_database()
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
         
-        # Generate API key
-        api_key = APIKeyGenerator.generate_api_key()
-        api_key_hash = APIKeyGenerator.hash_api_key(api_key)
-        
-        # Create database record
-        async with get_db_session() as session:
-            admin_key = APIKey(
-                name=admin_key_name,
-                key_hash=api_key_hash,
-                permission_level='admin',
-                is_active=True,
-                description=f"Development admin key created by setup_dev.py on {datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
-                usage_count=0,
-                created_by='setup_dev_script',
-                created_at=datetime.now(timezone.utc)
-            )
-            session.add(admin_key)
-            await session.commit()
-            await session.refresh(admin_key)
+        if result.returncode == 0:
+            # Parse the output to extract the API key
+            output_lines = result.stdout.split('\n')
+            api_key = None
+            key_id = None
             
-            print_success(f"Admin API key created: {admin_key_name}")
-            print(f"  🔑 Key: {Colors.BOLD}{api_key}{Colors.ENDC}")
-            print(f"  🆔 ID: {admin_key.id}")
+            for line in output_lines:
+                if '🔐 API Key: ' in line:
+                    api_key = line.split('🔐 API Key: ')[1].strip()
+                elif '🔑 API Key ID: ' in line:
+                    key_id = line.split('🔑 API Key ID: ')[1].strip()
             
-            return api_key
+            if api_key:
+                print_success(f"Admin API key created: {admin_key_name}")
+                print(f"  🔑 Key: {Colors.BOLD}{api_key}{Colors.ENDC}")
+                if key_id:
+                    print(f"  🆔 ID: {key_id}")
+                return api_key
+            else:
+                print_warning("Admin key was created but could not extract key from output")
+                # Print the full output for debugging
+                print("Full output:")
+                print(result.stdout)
+                return "check-container-logs"
+        else:
+            print_error(f"Failed to create admin API key via Docker")
+            print(f"Error output: {result.stderr}")
+            return None
             
+    except subprocess.TimeoutExpired:
+        print_error("Admin API key creation timed out")
+        return None
     except Exception as e:
         print_error(f"Failed to create admin API key: {e}")
         return None
@@ -489,7 +496,7 @@ Examples:
     return parser.parse_args()
 
 
-async def main():
+def main():
     """Main function."""
     args = parse_arguments()
     
@@ -526,7 +533,7 @@ async def main():
         
         # Step 7: Create admin API key
         if not args.skip_key:
-            admin_key = await create_admin_key(args.admin_key_name)
+            admin_key = create_admin_key_via_docker(args.admin_key_name)
         
         # Step 8: Print summary
         print_setup_summary(admin_key)
@@ -545,7 +552,7 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        main()
     except KeyboardInterrupt:
         print("\n\n👋 Setup cancelled by user")
         sys.exit(0)
