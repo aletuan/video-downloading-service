@@ -1,0 +1,47 @@
+# Web Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# YouTube Downloader
+yt-dlp==2023.10.13
+
+# AWS Integration
+boto3==1.29.7
+
+# Database
+sqlalchemy[asyncio]==2.0.23
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+alembic==1.13.1
+
+# Background Tasks
+celery[redis]==5.3.4
+redis>=4.5.2,<5.0.0
+
+# Data Validation
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Video Processing
+ffmpeg-python==0.2.0
+
+# Subtitle Processing
+pysrt==1.1.2
+webvtt-py==0.4.6
+
+# Async File Operations
+aiofiles==23.2.1
+
+# HTTP Client
+httpx==0.25.2
+
+# File Upload Support
+python-multipart==0.0.6
+
+# JSON Logging
+python-json-logger==2.0.7
+
+# WebSocket Support (included with FastAPI/uvicorn)
+
+# Additional utilities
+python-dateutil==2.8.2
