@@ -57,6 +57,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "videos" {
     id     = "video_lifecycle"
     status = "Enabled"
 
+    filter {
+      prefix = ""  # Apply to all objects
+    }
+
     # Transition to Infrequent Access after 30 days
     transition {
       days          = 30

@@ -288,10 +288,10 @@ resource "aws_ecs_service" "app" {
   # Development: Skip load balancer for cost optimization
   # In production, this would connect to an ALB target group
 
-  deployment_configuration {
-    maximum_percent         = 200
-    minimum_healthy_percent = 50
-  }
+  # deployment_configuration {
+  #   maximum_percent         = 200
+  #   minimum_healthy_percent = 50
+  # }
 
   tags = {
     Name = "${var.project_name}-${var.environment}-app-service"
@@ -312,10 +312,10 @@ resource "aws_ecs_service" "worker" {
     assign_public_ip = true  # Required for public subnet deployment
   }
 
-  deployment_configuration {
-    maximum_percent         = 200
-    minimum_healthy_percent = 0  # Workers can be interrupted
-  }
+  # deployment_configuration {
+  #   maximum_percent         = 200
+  #   minimum_healthy_percent = 0  # Workers can be interrupted
+  # }
 
   tags = {
     Name = "${var.project_name}-${var.environment}-worker-service"
