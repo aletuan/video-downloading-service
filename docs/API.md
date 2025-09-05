@@ -41,6 +41,10 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 - `GET /health/detailed` - Comprehensive system health
 - `GET /api/v1/info?url={youtube_url}` - Extract video information without downloading
 
+### Bootstrap Endpoints (Setup Only)
+- `GET /api/v1/bootstrap/status` - Check if system needs initial setup
+- `POST /api/v1/bootstrap/admin-key` - Create initial admin API key (one-time setup)
+
 ### Protected Endpoints (Require Authentication)
 - `POST /api/v1/download` - Start a new download job (DOWNLOAD permission required)
 - `GET /api/v1/status/{job_id}` - Get job status and details (READ_ONLY permission required)
@@ -56,6 +60,30 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 - `DELETE /api/v1/admin/api-keys/{key_id}` - Delete API key
 
 ## Usage Examples
+
+### Bootstrap Setup (First-time Setup)
+
+#### Check if system needs setup
+```bash
+curl "http://localhost:8000/api/v1/bootstrap/status"
+```
+
+#### Create initial admin API key (one-time setup)
+```bash
+curl -X POST "http://localhost:8000/api/v1/bootstrap/admin-key" \
+     -H "Content-Type: application/json" \
+     -H "X-Setup-Token: dev-bootstrap-token-12345" \
+     -d '{
+       "name": "Initial Admin Key",
+       "description": "Bootstrap admin key for initial setup"
+     }'
+```
+
+**Important Notes:**
+- This endpoint only works when **no admin keys exist** in the database
+- Requires `BOOTSTRAP_SETUP_TOKEN` environment variable
+- **Auto-disables** after creating the first admin key
+- Use the returned API key to create additional keys via admin endpoints
 
 ### Extract video information (public endpoint)
 ```bash

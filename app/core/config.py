@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
+import secrets
 
 
 class Settings(BaseSettings):
@@ -34,6 +35,9 @@ class Settings(BaseSettings):
     # Security
     secret_key: str = "your-secret-key-here-change-in-production"
     api_key_header: str = "X-API-Key"
+    
+    # Bootstrap/Setup
+    bootstrap_setup_token: str = secrets.token_urlsafe(32)
     
     model_config = SettingsConfigDict(env_file=".env")
 

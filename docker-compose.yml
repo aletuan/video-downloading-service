@@ -9,6 +9,7 @@ services:
       - DEBUG=true
       - DATABASE_URL=postgresql+asyncpg://postgres:password@db:5432/youtube_service
       - REDIS_URL=redis://redis:6379/0
+      - BOOTSTRAP_SETUP_TOKEN=dev-bootstrap-token-12345
     volumes:
       - ./downloads:/app/downloads
       - .env:/app/.env
