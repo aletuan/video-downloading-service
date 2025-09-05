@@ -729,7 +729,7 @@ aws ecs update-service --cluster youtube-downloader-dev-cluster-0ca94b2c --servi
 aws ecs update-service --cluster youtube-downloader-dev-cluster-0ca94b2c --service youtube-downloader-dev-worker --force-new-deployment
 ```
 
-**Alternative**: Use the provided script: `./rebuild-images.sh`
+**Alternative**: Use the provided script: `./scripts/rebuild-images.sh`
 
 - [x] **3. ECS Service Deployment**
   - [x] Update ECS task definitions to use real ECR images (✅ Fixed architecture + database driver issues)
@@ -784,7 +784,7 @@ All essential Phase 6G components have been successfully deployed and verified. 
   - [x] Database connectivity working (✅ No more psycopg2 conflicts)
   - [x] Architecture compatibility resolved (✅ x86_64/amd64 images)
   - [x] Container images pushed to ECR and deployed
-  - [x] **Rollback Plan**: `./deploy-infrastructure.sh rollback` available
+  - [x] **Rollback Plan**: `./scripts/deploy-infrastructure.sh rollback` available
 
 **✅ Success Criteria MET**: Production deployment operational with FastAPI and Celery services running, ALB routing traffic, and health checks passing.
 

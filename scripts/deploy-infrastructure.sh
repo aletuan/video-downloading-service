@@ -197,16 +197,16 @@ deploy_all_phases() {
         
         # Offer to rebuild if needed
         log "💡 If you need to rebuild images with correct architecture, run:"
-        log "   ./rebuild-images.sh"
+        log "   ./scripts/rebuild-images.sh"
         
         # Check if images are pushed to ECR
         if aws ecr describe-images --repository-name youtube-downloader/app --query 'imageDetails[0].imagePushedAt' &>/dev/null; then
             success "Images found in ECR"
         else
-            warning "Images not found in ECR - you may need to run ./rebuild-images.sh"
+            warning "Images not found in ECR - you may need to run ./scripts/rebuild-images.sh"
         fi
     else
-        warning "Docker images not found locally - you need to run ./rebuild-images.sh"
+        warning "Docker images not found locally - you need to run ./scripts/rebuild-images.sh"
     fi
     
     # Update Parameter Store for async database driver
@@ -300,9 +300,9 @@ show_deployment_summary() {
     echo ""
     log "📋 Available Actions:"
     echo "1. Test application: curl $ALB_ENDPOINT/health"
-    echo "2. Rebuild images: ./rebuild-images.sh" 
+    echo "2. Rebuild images: ./scripts/rebuild-images.sh" 
     echo "3. View ECS logs: aws logs get-log-events --log-group-name /ecs/youtube-downloader-dev-app"
-    echo "4. Rollback all: ./deploy-infrastructure.sh rollback"
+    echo "4. Rollback all: ./scripts/deploy-infrastructure.sh rollback"
     echo ""
     log "📁 Full outputs saved to: /tmp/terraform-final-outputs.txt"
     log "📁 Deployment log saved to: $LOG_FILE"
@@ -311,17 +311,74 @@ show_deployment_summary() {
 # Rollback function
 rollback_deployment() {
     warning "🚨 ROLLBACK REQUESTED"
-    log "This will destroy ALL infrastructure resources"
+    log "This will destroy ALL infrastructure resources AND ECR repositories"
+    log "⚠️  This includes:"
+    log "   - All Terraform resources (VPC, RDS, ECS, ALB, etc.)"
+    log "   - ECR repositories and all Docker images"
+    log "   - All stored data and configurations"
     
     read -p "Are you sure you want to destroy all resources? (type 'yes' to confirm): " confirm
     
     if [ "$confirm" = "yes" ]; then
-        cd "$TERRAFORM_DIR"
-        log "Destroying all infrastructure..."
-        if terraform destroy -auto-approve; then
-            success "All resources destroyed successfully"
+        # Step 1: Clean up ECR repositories first
+        log "Step 1/2: Cleaning up ECR repositories..."
+        
+        if aws ecr describe-repositories --region us-east-1 &>/dev/null; then
+            ECR_REPOS=$(aws ecr describe-repositories --region us-east-1 --query 'repositories[].repositoryName' --output text 2>/dev/null || echo "")
+            
+            if [[ -n "$ECR_REPOS" ]]; then
+                log "Found ECR repositories: $ECR_REPOS"
+                
+                for repo in $ECR_REPOS; do
+                    if [[ "$repo" == youtube-downloader/* ]]; then
+                        log "Deleting ECR repository: $repo"
+                        if aws ecr delete-repository --repository-name "$repo" --force --region us-east-1; then
+                            success "✅ ECR repository '$repo' deleted successfully"
+                        else
+                            warning "Failed to delete ECR repository '$repo'"
+                        fi
+                    fi
+                done
+            else
+                log "No ECR repositories found"
+            fi
         else
-            error "Rollback failed - manual cleanup may be required"
+            log "No ECR repositories found or AWS CLI not configured"
+        fi
+        
+        # Step 2: Destroy Terraform infrastructure
+        log "Step 2/2: Destroying Terraform infrastructure..."
+        cd "$TERRAFORM_DIR"
+        
+        if terraform destroy -auto-approve; then
+            success "✅ All Terraform resources destroyed successfully"
+            
+            # Final verification
+            log "Performing final cleanup verification..."
+            
+            # Check terraform state
+            if [ "$(terraform state list | wc -l)" -eq 0 ]; then
+                success "✅ Terraform state is clean"
+            else
+                warning "⚠️  Some resources may remain in terraform state"
+            fi
+            
+            # Check ECR repositories
+            ECR_CHECK=$(aws ecr describe-repositories --region us-east-1 --query 'repositories[].repositoryName' --output text 2>/dev/null || echo "")
+            if [[ -z "$ECR_CHECK" ]]; then
+                success "✅ All ECR repositories cleaned up"
+            else
+                warning "⚠️  Some ECR repositories may still exist: $ECR_CHECK"
+            fi
+            
+            success "🎉 Complete infrastructure rollback finished!"
+            log "💰 Cost savings: All recurring AWS charges eliminated"
+            
+        else
+            error "❌ Terraform rollback failed - manual cleanup may be required"
+            log "💡 You may need to manually delete ECR repositories:"
+            log "   aws ecr describe-repositories --region us-east-1"
+            log "   aws ecr delete-repository --repository-name REPO_NAME --force"
         fi
     else
         log "Rollback cancelled"

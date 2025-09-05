@@ -4,14 +4,18 @@ This directory contains utility scripts for the YouTube Download Service project
 
 ## Available Scripts
 
+### Production & Development Scripts
 - ✅ `create_admin_key.py` - **IMPLEMENTED** - Create initial admin API key for authentication
 - ✅ `setup_dev.py` - **IMPLEMENTED** - Complete development environment setup with cleanup
+
+### AWS Infrastructure Scripts  
+- ✅ `deploy-infrastructure.sh` - **IMPLEMENTED** - Complete AWS infrastructure deployment (Phases 6A-6G)
+- ✅ `rebuild-images.sh` - **IMPLEMENTED** - Docker image rebuild with AWS architecture compatibility
 
 ## Planned Scripts (To Be Implemented)
 
 - `seed_data.py` - Database seeding script for development testing
 - `migration_helper.py` - Database migration utilities and helpers
-- `deploy.sh` - Deployment automation and helper script
 - `test_auth.py` - Test authentication system functionality
 
 ## Current Status
@@ -70,14 +74,53 @@ python scripts/create_admin_key.py --docker
 python scripts/create_admin_key.py --help
 ```
 
+### deploy-infrastructure.sh
+
+Complete AWS infrastructure deployment with rollback capabilities:
+
+```bash
+# Full deployment (all phases 6A-6G)
+./scripts/deploy-infrastructure.sh
+
+# View deployment plan without applying
+./scripts/deploy-infrastructure.sh plan
+
+# Initialize terraform only
+./scripts/deploy-infrastructure.sh init
+
+# Complete rollback (destroys ALL resources including ECR)
+./scripts/deploy-infrastructure.sh rollback
+```
+
+**Rollback Features:**
+- ✅ Destroys all Terraform resources (VPC, RDS, ECS, ALB, etc.)
+- ✅ Deletes ECR repositories and all Docker images
+- ✅ Provides cost savings summary
+- ✅ Verification checks for complete cleanup
+
+### rebuild-images.sh
+
+Docker image rebuild with AWS ECS Fargate compatibility:
+
+```bash
+# Rebuild both app and worker images with correct architecture
+./scripts/rebuild-images.sh
+```
+
+**Features:**
+- ✅ Builds for linux/amd64 architecture (required for ECS Fargate)
+- ✅ Tags images correctly for ECR
+- ✅ Pushes images to AWS ECR repositories
+- ✅ Handles AWS authentication automatically
+
 ### General Script Usage
 
 ```bash
 # Python scripts
 python scripts/script_name.py
 
-# Shell scripts  
-bash scripts/script_name.sh
+# Shell scripts (run from project root)
+./scripts/script_name.sh
 ```
 
 ## Contributing
