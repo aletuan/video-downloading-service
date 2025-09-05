@@ -36,9 +36,9 @@ postgres_monitoring_interval      = 0                 # Cost optimization
 # Redis Configuration (Development Optimized)
 redis_node_type = "cache.t3.micro"  # ~$11/month
 
-# Container Images (Update these with actual ECR URIs after building)
-app_image    = "nginx:latest"  # Placeholder - replace with actual image
-worker_image = "nginx:latest"  # Placeholder - replace with actual image
+# Container Images (Updated with real ECR URIs)
+app_image    = "575108929177.dkr.ecr.us-east-1.amazonaws.com/youtube-downloader/app:latest"
+worker_image = "575108929177.dkr.ecr.us-east-1.amazonaws.com/youtube-downloader/worker:latest"
 
 # ECS Configuration (Development Optimized)
 app_cpu             = 256  # 0.25 vCPU

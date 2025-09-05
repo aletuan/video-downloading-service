@@ -178,7 +178,7 @@ resource "aws_ecs_task_definition" "app" {
       
       portMappings = [
         {
-          containerPort = 80  # nginx default port (temporary for placeholder)
+          containerPort = 8000  # FastAPI default port
           protocol     = "tcp"
         }
       ]
@@ -306,7 +306,7 @@ resource "aws_ecs_service" "app" {
     content {
       target_group_arn = var.target_group_arn
       container_name   = "fastapi-app"
-      container_port   = 80  # Use port 80 for nginx placeholder
+      container_port   = 8000  # FastAPI default port
     }
   }
 

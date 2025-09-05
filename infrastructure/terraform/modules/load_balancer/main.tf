@@ -34,7 +34,7 @@ resource "aws_lb" "main" {
 # Target Group for FastAPI Application
 resource "aws_lb_target_group" "app" {
   name     = "${substr(var.project_name, 0, 8)}-${var.environment}-app-tg-${random_id.alb_suffix.hex}"
-  port     = 80  # Use port 80 for nginx placeholder
+  port     = var.target_group_port
   protocol = var.target_group_protocol
   vpc_id   = var.vpc_id
 
@@ -49,7 +49,7 @@ resource "aws_lb_target_group" "app" {
     healthy_threshold   = var.healthy_threshold
     interval            = var.health_check_interval
     matcher             = "200"
-    path                = "/"  # Use root path for nginx compatibility
+    path                = var.health_check_path
     port                = "traffic-port"
     protocol            = var.target_group_protocol
     timeout             = var.health_check_timeout
