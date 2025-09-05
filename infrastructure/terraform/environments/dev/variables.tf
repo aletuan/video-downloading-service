@@ -217,3 +217,16 @@ variable "log_retention_days" {
   type        = number
   default     = 7  # Short retention for development
 }
+
+# Queue Configuration
+variable "queue_depth_alarm_threshold" {
+  description = "Threshold for SQS queue depth alarm"
+  type        = number
+  default     = 100  # Alert when queue has 100+ messages
+}
+
+variable "queue_enable_sns_notifications" {
+  description = "Enable SNS notifications for queue alarms"
+  type        = bool
+  default     = false  # Disabled for dev cost optimization
+}

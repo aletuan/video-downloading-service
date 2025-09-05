@@ -53,5 +53,9 @@ worker_desired_count = 1   # Single worker
 container_insights_enabled = false  # Cost optimization
 log_retention_days         = 7      # Short retention for dev
 
+# Queue Configuration (Development Optimized)
+queue_depth_alarm_threshold    = 100    # Alert when queue has 100+ messages
+queue_enable_sns_notifications = false  # Cost optimization
+
 # Expected Monthly Cost: ~$40-43
 # Expected Daily Cost: ~$1.35-1.45

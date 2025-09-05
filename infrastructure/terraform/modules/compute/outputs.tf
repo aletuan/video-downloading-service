@@ -69,6 +69,11 @@ output "task_role_arn" {
   value       = aws_iam_role.ecs_task.arn
 }
 
+output "ecs_task_role_arn" {
+  description = "ECS task role ARN (alias for compatibility)"
+  value       = aws_iam_role.ecs_task.arn
+}
+
 # CloudWatch Log Groups
 output "app_log_group_name" {
   description = "CloudWatch log group name for FastAPI application"

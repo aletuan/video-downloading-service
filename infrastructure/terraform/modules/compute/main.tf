@@ -141,6 +141,21 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
         Resource = [
           "arn:aws:ssm:*:*:parameter/${var.project_name}/${var.environment}/*"
         ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "sqs:SendMessage",
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:ChangeMessageVisibility",
+          "sqs:GetQueueAttributes",
+          "sqs:GetQueueUrl"
+        ]
+        Resource = [
+          "arn:aws:sqs:*:*:${var.project_name}-${var.environment}-main-queue-*",
+          "arn:aws:sqs:*:*:${var.project_name}-${var.environment}-dlq-*"
+        ]
       }
     ]
   })

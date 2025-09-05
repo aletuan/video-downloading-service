@@ -156,3 +156,14 @@ module "compute" {
   container_insights_enabled = var.container_insights_enabled
   log_retention_days         = var.log_retention_days
 }
+
+# Queue Module - Deployed after compute module for ECS task role dependency
+module "queue" {
+  source = "../../modules/queue"
+
+  project_name               = var.project_name
+  environment               = local.environment
+  ecs_task_role_arn         = module.compute.ecs_task_role_arn
+  queue_depth_alarm_threshold = var.queue_depth_alarm_threshold
+  enable_sns_notifications  = var.queue_enable_sns_notifications
+}
