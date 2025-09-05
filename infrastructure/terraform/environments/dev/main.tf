@@ -214,7 +214,7 @@ resource "null_resource" "database_migration" {
   triggers = {
     # Re-run if database endpoint changes or compute module changes
     database_endpoint = module.database.postgres_endpoint
-    cluster_name     = module.compute.ecs_cluster_name
+    cluster_name     = module.compute.cluster_name
     always_run       = timestamp()
   }
 
@@ -225,7 +225,7 @@ resource "null_resource" "database_migration" {
       echo "Starting database migration via ECS task..."
       
       # Get cluster name and task definition
-      CLUSTER_NAME="${module.compute.ecs_cluster_name}"
+      CLUSTER_NAME="${module.compute.cluster_name}"
       
       # Get the latest task definition ARN
       TASK_DEF_ARN=$(aws ecs describe-task-definition \
