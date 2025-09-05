@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # AWS Infrastructure Deployment Script
-# Deploys all phases from 6A through 6F systematically
-# Based on SUB-TASKS.md Phase 6 deployment strategy
+# Orchestrates Terraform deployment of all infrastructure components
+# Role: Script coordination only - infrastructure logic is in Terraform modules
 
 set -e  # Exit on any error
 
@@ -171,18 +171,18 @@ deploy_all_phases() {
         exit 1
     fi
     
-    # Phase 6E: Compute Platform
-    if deploy_module "6E" "compute" "Compute Platform (ECS Fargate Cluster + Task Definitions)"; then
-        log "✅ Phase 6E: ECS compute platform deployed"
+    # Phase 6E: Load Balancing & Security (Must come before Compute for target group dependency)
+    if deploy_module "6E" "load_balancer" "Load Balancing & Security (ALB + Target Groups + SSL)"; then
+        log "✅ Phase 6E: Load balancer and security deployed"
         sleep 10
     else
         error "Phase 6E failed - stopping deployment"
         exit 1
     fi
     
-    # Phase 6F: Load Balancing & Security
-    if deploy_module "6F" "load_balancer" "Load Balancing & Security (ALB + Target Groups + SSL)"; then
-        log "✅ Phase 6F: Load balancer and security deployed"
+    # Phase 6F: Compute Platform (Depends on Load Balancer target group)
+    if deploy_module "6F" "compute" "Compute Platform (ECS Fargate Cluster + Task Definitions)"; then
+        log "✅ Phase 6F: ECS compute platform deployed"
         sleep 10
     else
         error "Phase 6F failed - stopping deployment"
@@ -202,39 +202,34 @@ deploy_all_phases() {
         success "ECR repositories created"
     fi
     
-    # Check Docker images
-    log "Checking Docker images..."
-    if docker images | grep -q "youtube-downloader.*latest"; then
-        success "Docker images found locally"
-        
-        # Offer to rebuild if needed
-        log "💡 If you need to rebuild images with correct architecture, run:"
-        log "   ./scripts/rebuild-images.sh"
-        
-        # Check if images are pushed to ECR
-        if aws ecr describe-images --repository-name youtube-downloader/app --query 'imageDetails[0].imagePushedAt' &>/dev/null; then
-            success "Images found in ECR"
-        else
-            warning "Images not found in ECR - you may need to run ./scripts/rebuild-images.sh"
-        fi
+    # Build and push Docker images automatically
+    log "Building and pushing Docker images..."
+    
+    # Call the rebuild-images script to ensure fresh images with correct architecture
+    log "Executing rebuild-images.sh to build fresh Docker images with correct architecture..."
+    if "${SCRIPT_DIR}/rebuild-images.sh"; then
+        success "Docker images built and pushed successfully"
     else
-        warning "Docker images not found locally - you need to run ./scripts/rebuild-images.sh"
+        error "Failed to build and push Docker images"
+        return 1
     fi
     
-    # Update Parameter Store for async database driver
-    log "Updating database configuration for async operations..."
-    CURRENT_DB_URL=$(aws ssm get-parameter --name /youtube-downloader/dev/database/url --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || echo "")
-    
-    if [[ "$CURRENT_DB_URL" == postgresql://* ]]; then
-        # Update to use asyncpg driver
-        NEW_DB_URL="${CURRENT_DB_URL/postgresql:/\/postgresql+asyncpg:/\/}"
-        aws ssm put-parameter --name /youtube-downloader/dev/database/url --value "$NEW_DB_URL" --type SecureString --overwrite
-        success "Database URL updated to use async driver (asyncpg)"
-    elif [[ "$CURRENT_DB_URL" == postgresql+asyncpg://* ]]; then
-        success "Database URL already configured for async operations"
+    # Verify images are in ECR
+    log "Verifying images in ECR..."
+    if aws ecr describe-images --repository-name youtube-downloader/app --query 'imageDetails[0].imagePushedAt' &>/dev/null; then
+        success "App image verified in ECR"
     else
-        warning "Database URL not found or invalid format"
+        warning "App image verification failed"
     fi
+    
+    if aws ecr describe-images --repository-name youtube-downloader/worker --query 'imageDetails[0].imagePushedAt' &>/dev/null; then
+        success "Worker image verified in ECR" 
+    else
+        warning "Worker image verification failed"
+    fi
+    
+    # Note: Database configuration is now handled by Terraform directly
+    log "Database configuration handled by Terraform (SSL + async driver)"
     
     # Force ECS deployment to use latest images
     log "Forcing ECS deployment with latest task definitions..."
@@ -300,13 +295,14 @@ deploy_all_phases() {
         fi
     fi
     
-    # Final verification
+    # Final verification (database migration now handled by Terraform null_resource)
     log "Final verification and configuration"
     cd "$TERRAFORM_DIR" 
     terraform output > "/tmp/terraform-final-outputs.txt"
     
     success "🎉 All phases deployed successfully!"
     success "✅ Phase 6G: Production Application Deployment completed!"
+    success "✅ Database migration handled by Terraform null_resource"
 }
 
 # Show deployment summary
@@ -427,8 +423,8 @@ rollback_deployment() {
 main() {
     echo ""
     log "🚀 AWS Infrastructure Deployment Script"
-    log "Based on SUB-TASKS.md Phase 6 Strategy (6A-6G Complete)"
-    log "Deploys: VPC → Storage → Database → Queue → Compute → LoadBalancer → Application"
+    log "Orchestrates Terraform deployment across all modules"
+    log "Deploys: VPC → Storage → Database → Queue → LoadBalancer → Compute → Application"
     echo ""
     
     # Handle command line arguments

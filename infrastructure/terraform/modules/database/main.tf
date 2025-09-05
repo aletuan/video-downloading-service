@@ -3,8 +3,10 @@
 
 # Random password for RDS
 resource "random_password" "db_password" {
-  length  = 16
-  special = true
+  length      = 16
+  special     = true
+  # Exclude characters that are not allowed by RDS: '/', '@', '"', ' '
+  override_special = "!#$%&*()-_=+[]{}<>:;?,.~"
 }
 
 # Random suffix for unique resource names
