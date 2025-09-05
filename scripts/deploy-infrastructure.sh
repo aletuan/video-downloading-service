@@ -14,7 +14,9 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-TERRAFORM_DIR="/Users/andy/Workspace/Claude/video-downloading-service/infrastructure/terraform/environments/dev"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+TERRAFORM_DIR="${PROJECT_ROOT}/infrastructure/terraform/environments/dev"
 LOG_FILE="/tmp/terraform-deployment.log"
 
 # Utility functions
@@ -32,6 +34,16 @@ warning() {
 
 error() {
     echo -e "${RED}❌ $1${NC}" | tee -a "$LOG_FILE"
+}
+
+# Extract values from terraform outputs
+get_terraform_output() {
+    local output_name=$1
+    local default_value=${2:-""}
+    
+    cd "$TERRAFORM_DIR"
+    local value=$(terraform output -raw "$output_name" 2>/dev/null || echo "$default_value")
+    echo "$value"
 }
 
 # Check prerequisites
@@ -226,16 +238,42 @@ deploy_all_phases() {
     
     # Force ECS deployment to use latest images
     log "Forcing ECS deployment with latest task definitions..."
-    aws ecs update-service --cluster youtube-downloader-dev-cluster-0ca94b2c --service youtube-downloader-dev-app --force-new-deployment &>/dev/null || warning "Failed to update app service"
-    aws ecs update-service --cluster youtube-downloader-dev-cluster-0ca94b2c --service youtube-downloader-dev-worker --force-new-deployment &>/dev/null || warning "Failed to update worker service"
+    
+    # Get cluster and service names from terraform outputs
+    CLUSTER_NAME=$(get_terraform_output "ecs_cluster_name")
+    APP_SERVICE_NAME=$(get_terraform_output "app_service_name")
+    WORKER_SERVICE_NAME=$(get_terraform_output "worker_service_name")
+    
+    if [[ -n "$CLUSTER_NAME" && -n "$APP_SERVICE_NAME" ]]; then
+        aws ecs update-service --cluster "$CLUSTER_NAME" --service "$APP_SERVICE_NAME" --force-new-deployment &>/dev/null || warning "Failed to update app service"
+        log "Updated app service: $APP_SERVICE_NAME on cluster: $CLUSTER_NAME"
+    else
+        warning "Could not extract cluster/service names from terraform outputs"
+    fi
+    
+    if [[ -n "$CLUSTER_NAME" && -n "$WORKER_SERVICE_NAME" ]]; then
+        aws ecs update-service --cluster "$CLUSTER_NAME" --service "$WORKER_SERVICE_NAME" --force-new-deployment &>/dev/null || warning "Failed to update worker service"
+        log "Updated worker service: $WORKER_SERVICE_NAME on cluster: $CLUSTER_NAME"
+    else
+        warning "Could not extract worker service name from terraform outputs"
+    fi
     
     # Wait for services to stabilize
     log "Waiting for ECS services to stabilize..."
     sleep 30
     
     # Check ECS service health
-    APP_STATUS=$(aws ecs describe-services --cluster youtube-downloader-dev-cluster-0ca94b2c --services youtube-downloader-dev-app --query 'services[0].{running:runningCount,desired:desiredCount}' --output text 2>/dev/null)
-    WORKER_STATUS=$(aws ecs describe-services --cluster youtube-downloader-dev-cluster-0ca94b2c --services youtube-downloader-dev-worker --query 'services[0].{running:runningCount,desired:desiredCount}' --output text 2>/dev/null)
+    if [[ -n "$CLUSTER_NAME" && -n "$APP_SERVICE_NAME" ]]; then
+        APP_STATUS=$(aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$APP_SERVICE_NAME" --query 'services[0].{running:runningCount,desired:desiredCount}' --output text 2>/dev/null)
+    else
+        APP_STATUS="Unknown - cluster/service names not available"
+    fi
+    
+    if [[ -n "$CLUSTER_NAME" && -n "$WORKER_SERVICE_NAME" ]]; then
+        WORKER_STATUS=$(aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$WORKER_SERVICE_NAME" --query 'services[0].{running:runningCount,desired:desiredCount}' --output text 2>/dev/null)
+    else
+        WORKER_STATUS="Unknown - cluster/service names not available"
+    fi
     
     if [[ "$APP_STATUS" == *"1	1"* ]]; then
         success "FastAPI service is running (1/1)"
