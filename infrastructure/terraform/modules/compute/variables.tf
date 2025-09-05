@@ -99,3 +99,10 @@ variable "log_retention_days" {
   type        = number
   default     = 7  # Short retention for development
 }
+
+# Load Balancer Integration
+variable "target_group_arn" {
+  description = "ARN of the ALB target group for the FastAPI app"
+  type        = string
+  default     = ""
+}

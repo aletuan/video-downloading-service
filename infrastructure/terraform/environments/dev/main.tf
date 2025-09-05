@@ -155,6 +155,9 @@ module "compute" {
   # Monitoring
   container_insights_enabled = var.container_insights_enabled
   log_retention_days         = var.log_retention_days
+  
+  # Load Balancer Integration
+  target_group_arn = module.load_balancer.target_group_arn
 }
 
 # Queue Module - Deployed after compute module for ECS task role dependency
@@ -166,4 +169,36 @@ module "queue" {
   ecs_task_role_arn         = module.compute.ecs_task_role_arn
   queue_depth_alarm_threshold = var.queue_depth_alarm_threshold
   enable_sns_notifications  = var.queue_enable_sns_notifications
+}
+
+# Load Balancer Module - Deployed after networking and compute modules
+module "load_balancer" {
+  source = "../../modules/load_balancer"
+
+  project_name     = var.project_name
+  environment     = local.environment
+  vpc_id          = module.networking.vpc_id
+  subnet_ids      = module.networking.public_subnet_ids
+  security_group_id = module.networking.alb_security_group_id
+
+  # Health check configuration
+  health_check_path     = "/health"
+  health_check_interval = 30
+  health_check_timeout  = 5
+  healthy_threshold     = 2
+  unhealthy_threshold   = 3
+
+  # ALB configuration  
+  enable_deletion_protection = false  # Development environment
+  enable_http2              = true
+  idle_timeout              = 60
+
+  # Target group configuration
+  target_group_port     = 8000
+  target_group_protocol = "HTTP"
+
+  # SSL certificate (optional - can be added later)
+  certificate_arn = ""  # No SSL for development initially
+
+  tags = local.common_tags
 }

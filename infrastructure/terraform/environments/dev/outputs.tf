@@ -103,6 +103,32 @@ output "log_groups" {
   }
 }
 
+# Load Balancer Outputs
+output "alb_dns_name" {
+  description = "Application Load Balancer DNS name"
+  value       = module.load_balancer.alb_dns_name
+}
+
+output "alb_endpoint" {
+  description = "Application Load Balancer endpoint URL"
+  value       = module.load_balancer.alb_endpoint
+}
+
+output "alb_zone_id" {
+  description = "Application Load Balancer zone ID"
+  value       = module.load_balancer.alb_zone_id
+}
+
+output "target_group_arn" {
+  description = "Target group ARN"
+  value       = module.load_balancer.target_group_arn
+}
+
+output "target_group_name" {
+  description = "Target group name"
+  value       = module.load_balancer.target_group_name
+}
+
 # Connection Information
 output "database_connection_info" {
   description = "Database connection information"

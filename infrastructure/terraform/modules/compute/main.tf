@@ -178,7 +178,7 @@ resource "aws_ecs_task_definition" "app" {
       
       portMappings = [
         {
-          containerPort = 8000
+          containerPort = 80  # nginx default port (temporary for placeholder)
           protocol     = "tcp"
         }
       ]
@@ -300,12 +300,20 @@ resource "aws_ecs_service" "app" {
     assign_public_ip = true  # Required for public subnet deployment
   }
 
-  # Development: Skip load balancer for cost optimization
-  # In production, this would connect to an ALB target group
+  # Load balancer integration (when target_group_arn is provided)
+  dynamic "load_balancer" {
+    for_each = var.target_group_arn != "" ? [1] : []
+    content {
+      target_group_arn = var.target_group_arn
+      container_name   = "fastapi-app"
+      container_port   = 80  # Use port 80 for nginx placeholder
+    }
+  }
 
+  # Enable rolling deployments with load balancer (commented out temporarily)
   # deployment_configuration {
   #   maximum_percent         = 200
-  #   minimum_healthy_percent = 50
+  #   minimum_healthy_percent = var.target_group_arn != "" ? 50 : 0
   # }
 
   tags = {
