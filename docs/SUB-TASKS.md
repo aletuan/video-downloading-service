@@ -1,5 +1,7 @@
 # YouTube Video Download Service - AWS Deployment Guide
 
+> **Related Documentation**: See [AWS-INFRASTRUCTURE.md](AWS-INFRASTRUCTURE.md) for comprehensive architecture planning, service configurations, and scaling strategies.
+
 ## 📋 Executive Summary
 
 **Current Status**: Phase 6G - Production Deployment **FULLY COMPLETED** ✅  
@@ -8,11 +10,11 @@
 **Deployment Method**: Terraform + ECS Fargate + Application Load Balancer
 
 ### 🎯 **Key Achievements**
-- ✅ **Complete AWS Infrastructure**: All 6 phases (A-G) successfully deployed
-- ✅ **Production Application**: FastAPI + Celery services running on ECS
+- ✅ **Complete AWS Infrastructure**: All 6 phases (A-G) successfully deployed per [AWS-INFRASTRUCTURE.md](AWS-INFRASTRUCTURE.md) "Optimal Development" configuration
+- ✅ **Production Application**: FastAPI + Celery services running on ECS Fargate
 - ✅ **Bootstrap Security**: Solved "chicken and egg" API key problem for production
 - ✅ **Health Monitoring**: Load balancer health checks passing
-- ✅ **Cost Optimized**: Development-friendly resource sizing
+- ✅ **Cost Optimized**: Development-friendly resource sizing (~$60/month)
 
 ### 🚀 **Production Ready Features**
 - **Application Endpoint**: Load balancer with health checks
@@ -320,6 +322,8 @@ aws ecs describe-task-definition --task-definition <TASK-DEF-NAME>
 
 ### Phase 6H: Extended Production Features (Optional)
 
+> **Reference**: See [AWS-INFRASTRUCTURE.md](AWS-INFRASTRUCTURE.md) "Option 3: Production Ready" for detailed production architecture planning.
+
 #### 1. SSL Certificate and HTTPS
 - Request ACM certificate for custom domain
 - Configure HTTPS listener on ALB
@@ -336,7 +340,7 @@ aws ecs describe-task-definition --task-definition <TASK-DEF-NAME>
 - Enhanced audit logging
 
 #### 4. Performance Optimization
-- Auto-scaling configuration
+- Auto-scaling configuration (see [AWS-INFRASTRUCTURE.md](AWS-INFRASTRUCTURE.md) scaling policies)
 - CloudFront CDN for static assets
 - Database read replicas
 
@@ -414,7 +418,12 @@ aws s3api delete-bucket --bucket <BUCKET-NAME>
 
 ## 📚 Additional Resources
 
-### Documentation Links
+### Project Documentation
+- **[AWS-INFRASTRUCTURE.md](AWS-INFRASTRUCTURE.md)**: Architecture planning, service configurations, scaling strategies, and cost analysis
+- **[API.md](API.md)**: Complete API documentation, authentication guide, and endpoint examples
+- **[../CLAUDE.md](../CLAUDE.md)**: Development commands, architecture overview, and local testing procedures
+
+### AWS Documentation Links
 - [Terraform AWS Provider Documentation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
 - [ECS Fargate Documentation](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html)
 - [Application Load Balancer Guide](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/)

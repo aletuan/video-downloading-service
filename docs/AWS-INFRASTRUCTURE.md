@@ -2,6 +2,8 @@
 
 > Comprehensive guide for AWS deployment options, service configurations, and scaling strategies for the YouTube Video Download Service.
 
+> **Related Documentation**: See [SUB-TASKS.md](SUB-TASKS.md) for current deployment status, operational procedures, and step-by-step deployment guide.
+
 ## Architecture Options Comparison
 
 ### Option 1: Ultra-Minimal Development (~$17-18/month)
@@ -34,7 +36,7 @@
 - S3 Storage (20GB): ~$1/month  
 - VPC Basic: ~$1-2/month
 
-### Option 2: Optimal Development (~$25-35/month) ⭐ **RECOMMENDED**
+### Option 2: Optimal Development (~$59-60/month) ⭐ **CURRENTLY DEPLOYED**
 **Target**: Proper development environment with managed services
 
 ```
@@ -67,12 +69,13 @@
 - **S3**: Video file storage
 - **VPC**: Public subnets (no NAT Gateway)
 
-**Monthly Cost: ~$40-42**
-- ECS Fargate (2 tasks): ~$14/month
+**Monthly Cost: ~$59-60** (Currently Deployed Configuration)
+- ECS Fargate (2 tasks): ~$15/month
 - RDS PostgreSQL: ~$12/month
 - ElastiCache Redis: ~$11/month
-- VPC + Networking: ~$2/month
-- S3 Storage (50GB): ~$1-2/month
+- Application Load Balancer: ~$21/month
+- SQS + CloudWatch: ~$0.70/month
+- S3 Storage (10GB): ~$0.25-0.50/month
 
 ### Option 3: Production Ready (~$355-705/month)
 **Target**: Scalable production environment with high availability
@@ -453,13 +456,25 @@ variable "feature_flags" {
 3. **Performance**: Read replicas, ElastiCache clustering
 4. **Compliance**: Backup automation, encryption
 
-## Next Steps
+## Current Implementation Status
 
-1. **Review and Approve**: Confirm optimal development approach
-2. **Terraform Implementation**: Build infrastructure modules
-3. **Environment Setup**: Deploy development environment
-4. **Application Deployment**: Deploy containers to ECS
-5. **Testing & Validation**: Verify full functionality
-6. **Documentation**: Update deployment procedures
+**✅ Completed (Phase 6G)**: The "Optimal Development" configuration has been successfully deployed to AWS:
+- All infrastructure components operational
+- FastAPI and Celery services running on ECS Fargate
+- Bootstrap endpoint implemented for production API key management
+- Load balancer health checks passing
 
-This infrastructure plan provides a clear path from cost-effective development to scalable production while maintaining visibility into costs and upgrade paths at each stage.
+**🚧 Next Steps**: See [SUB-TASKS.md](SUB-TASKS.md) for:
+- Current deployment status details
+- End-to-end testing procedures
+- Production upgrade path (Phase 6H)
+- Operational troubleshooting guides
+
+## Related Documentation
+
+- **[SUB-TASKS.md](SUB-TASKS.md)**: Current deployment status, operational procedures, and testing guide
+- **[API.md](API.md)**: API endpoint documentation and authentication setup
+- **[../scripts/deploy-infrastructure.sh](../scripts/deploy-infrastructure.sh)**: Automated deployment script
+- **[../scripts/rebuild-images.sh](../scripts/rebuild-images.sh)**: Docker image build and deployment script
+
+This infrastructure plan provided the foundation for the current AWS deployment, achieving a balance between cost-effectiveness (~$60/month) and production-ready features.
