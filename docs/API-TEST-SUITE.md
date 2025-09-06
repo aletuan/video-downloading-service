@@ -1,15 +1,18 @@
 # API Test Suite - YouTube Video Downloading Service
 
 ## Overview
+
 This test suite provides comprehensive end-to-end testing of the YouTube video downloading service deployed on AWS infrastructure. Tests are designed to be run systematically to validate all components from infrastructure to video processing.
 
 ## Prerequisites
+
 - AWS infrastructure deployed via `./scripts/deploy-infrastructure.sh`
 - Docker images built and pushed to ECR
 - ALB DNS name available (replace `{ALB_DNS}` in commands)
 - `jq` installed for JSON parsing
 
 ## Test Environment Variables
+
 ```bash
 export ALB_DNS="youtube-do-dev-alb-ff494fc6-1992147449.us-east-1.elb.amazonaws.com"
 export S3_BUCKET="youtube-downloader-dev-videos-dc6abb7746a3ee7b"
@@ -20,6 +23,7 @@ export S3_BUCKET="youtube-downloader-dev-videos-dc6abb7746a3ee7b"
 ## Phase 1: Health Checks (No Authentication Required)
 
 ### Test 1: Basic Health Check
+
 **Purpose:** Verify service is running and responsive  
 **Expected Outcome:** 200 OK with basic service information
 
@@ -30,6 +34,7 @@ curl "http://${ALB_DNS}/health" \
 ```
 
 **Expected Response:**
+
 ```json
 {
   "status": "healthy",
@@ -39,6 +44,7 @@ curl "http://${ALB_DNS}/health" \
 ```
 
 ### Test 2: Detailed Health Check
+
 **Purpose:** Verify all system components (database, storage)  
 **Expected Outcome:** 200 OK with detailed component status
 
@@ -47,6 +53,7 @@ curl "http://${ALB_DNS}/health/detailed" -s | jq .
 ```
 
 **Expected Response:**
+
 ```json
 {
   "status": "healthy",
@@ -71,6 +78,7 @@ curl "http://${ALB_DNS}/health/detailed" -s | jq .
 ```
 
 **Key Validation Points:**
+
 - `environment` must be `"aws"` (not "dev")
 - `storage_type` must be `"S3StorageHandler"` (not "LocalStorageHandler")  
 - `bucket_name` must not be `null`
@@ -80,6 +88,7 @@ curl "http://${ALB_DNS}/health/detailed" -s | jq .
 ## Phase 2: Bootstrap Setup
 
 ### Test 3: Bootstrap Status
+
 **Purpose:** Check if system needs initial setup  
 **Expected Outcome:** 200 OK with bootstrap availability status
 
@@ -88,6 +97,7 @@ curl "http://${ALB_DNS}/api/v1/bootstrap/status" -s | jq .
 ```
 
 **Expected Response (Before Setup):**
+
 ```json
 {
   "bootstrap_available": true,
@@ -99,6 +109,7 @@ curl "http://${ALB_DNS}/api/v1/bootstrap/status" -s | jq .
 ```
 
 ### Test 4: Create Admin Key via Bootstrap
+
 **Purpose:** Create initial admin API key  
 **Expected Outcome:** 200 OK with admin API key
 
@@ -116,6 +127,7 @@ curl -X POST "http://${ALB_DNS}/api/v1/bootstrap/admin-key" \
 ```
 
 **Expected Response:**
+
 ```json
 {
   "api_key": "yvs_hOP-...",
@@ -130,6 +142,7 @@ curl -X POST "http://${ALB_DNS}/api/v1/bootstrap/admin-key" \
 **Important:** Save the `api_key` value for subsequent tests!
 
 ### Test 4b: Verify Bootstrap Disabled
+
 **Purpose:** Confirm bootstrap endpoint is properly secured  
 **Expected Outcome:** 200 OK showing system is configured
 
@@ -138,6 +151,7 @@ curl "http://${ALB_DNS}/api/v1/bootstrap/status" -s | jq .
 ```
 
 **Expected Response (After Setup):**
+
 ```json
 {
   "bootstrap_available": false,
@@ -151,6 +165,7 @@ curl "http://${ALB_DNS}/api/v1/bootstrap/status" -s | jq .
 ## Phase 3: Public Endpoints
 
 ### Test 5: Video Info Extraction
+
 **Purpose:** Test video information extraction (no auth required)  
 **Expected Outcome:** 200 OK with video metadata OR 502 due to ALB timeout
 
@@ -160,11 +175,13 @@ curl "http://${ALB_DNS}/api/v1/info?url=https://www.youtube.com/watch?v=dQw4w9Wg
 ```
 
 **Expected Behavior:**
+
 - **Success**: JSON with video title, duration, available formats
 - **502 Bad Gateway**: Expected due to ALB timeout (~29s processing time)
 - **Verification**: Check logs to confirm processing completed successfully
 
 **Log Verification:**
+
 ```bash
 aws logs filter-log-events \
   --log-group-name "/ecs/youtube-downloader-dev-app" \
@@ -177,6 +194,7 @@ aws logs filter-log-events \
 ## Phase 4: Authentication Tests
 
 ### Test 6: List API Keys (Admin Endpoint)
+
 **Purpose:** Test admin authentication and API key management  
 **Expected Outcome:** 200 OK with API key list
 
@@ -188,6 +206,7 @@ curl "http://${ALB_DNS}/api/v1/admin/api-keys" \
 ```
 
 **Expected Response:**
+
 ```json
 {
   "api_keys": [
@@ -209,6 +228,7 @@ curl "http://${ALB_DNS}/api/v1/admin/api-keys" \
 ```
 
 ### Test 7: Create Download API Key
+
 **Purpose:** Create API key with download permissions  
 **Expected Outcome:** 200 OK with new download API key
 
@@ -224,6 +244,7 @@ curl -X POST "http://${ALB_DNS}/api/v1/admin/api-keys" \
 ```
 
 **Expected Response:**
+
 ```json
 {
   "api_key": "yvs_37e1fb69...",
@@ -245,6 +266,7 @@ curl -X POST "http://${ALB_DNS}/api/v1/admin/api-keys" \
 ## Phase 5: Download Operations
 
 ### Test 8: Start Video Download
+
 **Purpose:** Test core video download functionality  
 **Expected Outcome:** 200 OK with job ID (fast async response)
 
@@ -262,6 +284,7 @@ curl -X POST "http://${ALB_DNS}/api/v1/download" \
 ```
 
 **Expected Response:**
+
 ```json
 {
   "job_id": "2eee8e33-af7f-472f-be54-8d1bc3d4752b",
@@ -272,11 +295,13 @@ curl -X POST "http://${ALB_DNS}/api/v1/download" \
 ```
 
 **Key Validation:**
+
 - Response time should be < 1 second (async job queuing)
 - `job_id` should be a valid UUID
 - `status` should be `"queued"`
 
 ### Test 9: Check Job Status
+
 **Purpose:** Monitor download progress and completion  
 **Expected Outcome:** Status progression from queued → processing → completed
 
@@ -296,11 +321,13 @@ curl "http://${ALB_DNS}/api/v1/status/${JOB_ID}" \
 ```
 
 **Expected Status Progression:**
+
 1. `"queued"` → Job accepted, waiting for worker
 2. `"processing"` → Worker actively downloading
 3. `"completed"` → Download finished successfully
 
 **Expected Final Response:**
+
 ```json
 {
   "status": "completed",
@@ -314,6 +341,7 @@ curl "http://${ALB_DNS}/api/v1/status/${JOB_ID}" \
 **Permission Note:** Download key lacks READ_ONLY permission for status checking. Use admin key.
 
 ### Test 10: Verify S3 Storage
+
 **Purpose:** Confirm files are stored in S3 bucket  
 **Expected Outcome:** Files present in S3 with correct structure
 
@@ -322,6 +350,7 @@ aws s3 ls s3://${S3_BUCKET}/ --recursive
 ```
 
 **Expected S3 Structure:**
+
 ```
 downloads/{job_id}/
 ├── Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster).mp4  (~11.7 MB)
@@ -331,6 +360,7 @@ downloads/{job_id}/
 ```
 
 **Key Validation:**
+
 - Video file should be 10-15 MB (720p quality)
 - Subtitles should be present if available
 - Thumbnail should be included
@@ -341,6 +371,7 @@ downloads/{job_id}/
 ## Phase 6: Additional API Tests
 
 ### Test 11: List Download Jobs
+
 **Purpose:** Test job listing functionality  
 **Expected Outcome:** 200 OK with paginated job list
 
@@ -350,6 +381,7 @@ curl "http://${ALB_DNS}/api/v1/jobs" \
 ```
 
 **Expected Response Structure:**
+
 ```json
 {
   "jobs": [...],
@@ -367,26 +399,31 @@ curl "http://${ALB_DNS}/api/v1/jobs" \
 ### Common Issues and Solutions
 
 #### 1. S3 Storage Handler Not Working
+
 **Symptoms:** `storage_type: "LocalStorageHandler"` in health check  
 **Cause:** Wrong ENVIRONMENT variable in ECS task definition  
 **Solution:** Ensure `ENVIRONMENT=aws` in task definition (not "dev")
 
 #### 2. Database Migration Failures
+
 **Symptoms:** Bootstrap returns table errors  
 **Cause:** SSL parameter incompatibility or missing security groups  
 **Solution:** Check `alembic/env.py` SSL conversion and ECS security groups
 
 #### 3. ALB 502 Bad Gateway
+
 **Symptoms:** Video info endpoint times out  
 **Cause:** Processing time exceeds ALB timeout  
 **Expected:** This is normal for video processing (check logs for success)
 
 #### 4. Permission Denied Errors
+
 **Symptoms:** "Permission 'APIKeyPermission.READ_ONLY' required"  
 **Cause:** API key lacks required permissions  
 **Solution:** Use admin key or create key with appropriate permissions
 
 #### 5. Bootstrap Already Disabled
+
 **Symptoms:** Bootstrap endpoint returns "already configured"  
 **Cause:** Admin keys already exist in database  
 **Solution:** Normal behavior after initial setup - use existing admin key
@@ -396,6 +433,7 @@ curl "http://${ALB_DNS}/api/v1/jobs" \
 ## Performance Benchmarks
 
 ### Expected Response Times
+
 - **Health Checks:** < 1 second
 - **API Key Operations:** < 1 second  
 - **Download Job Submission:** < 1 second
@@ -404,6 +442,7 @@ curl "http://${ALB_DNS}/api/v1/jobs" \
 - **Job Status Check:** < 1 second
 
 ### Expected File Sizes (720p MP4)
+
 - **3-4 minute videos:** 10-20 MB
 - **Subtitles:** 2-10 KB
 - **Thumbnails:** 20-50 KB
@@ -443,6 +482,7 @@ echo "Test Suite Complete"
 ## Maintenance Notes
 
 ### Regular Health Checks
+
 Run these commands periodically to verify system health:
 
 ```bash
@@ -457,6 +497,7 @@ curl -s "http://${ALB_DNS}/api/v1/jobs?per_page=5" -H "X-API-Key: ${ADMIN_KEY}" 
 ```
 
 ### Log Monitoring
+
 ```bash
 # Application logs
 aws logs tail /ecs/youtube-downloader-dev-app --follow

@@ -2,7 +2,7 @@
 
 ## Project Structure
 
-```
+```text
 video-downloading-service/
 ├── app/                      # Main application code
 │   ├── api/                  # FastAPI routes and endpoints
@@ -90,6 +90,7 @@ curl -H "X-API-Key: your-admin-key-here" http://localhost:8000/api/v1/admin/api-
 ## Code Quality
 
 ### Formatting and Linting
+
 ```bash
 # Format code
 black app/ tests/
@@ -133,6 +134,7 @@ docker compose exec app bash
 ## Local Development Setup
 
 ### Prerequisites
+
 - Python 3.11+
 - Docker & Docker Compose
 - FFmpeg (for video processing)
@@ -140,23 +142,27 @@ docker compose exec app bash
 ### Installation Steps
 
 1. **Clone the repository:**
+
    ```bash
    git clone https://github.com/andy/video-downloading-service.git
    cd video-downloading-service
    ```
 
 2. **Set up environment:**
+
    ```bash
    cp .env.example .env
    # Edit .env with your configuration
    ```
 
 3. **Start with Docker (Recommended):**
+
    ```bash
    docker compose up -d --build
    ```
 
 4. **Or run locally:**
+
    ```bash
    # Install dependencies
    pip install -r requirements.txt

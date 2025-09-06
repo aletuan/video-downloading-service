@@ -232,4 +232,4 @@ curl http://<ALB-DNS-NAME>/api/v1/bootstrap/status
 
 ---
 
-*Document Version: 3.0 - Streamlined for Production*
+***Document Version: 3.0 - Streamlined for Production***

@@ -7,9 +7,10 @@
 ## Architecture Options Comparison
 
 ### Option 1: Ultra-Minimal Development (~$17-18/month)
+
 **Target**: Initial development and testing with absolute minimal cost
 
-```
+```text
 ┌─────────────────────────────────────────┐
 │              ECS Fargate                │
 │  ┌─────────────────────────────────────┐│
@@ -27,11 +28,13 @@
 ```
 
 **Services:**
+
 - **ECS Fargate**: Single all-in-one container
 - **S3**: Basic video storage
 - **VPC**: Public subnet only
 
-**Monthly Cost: ~$17-18**
+****Monthly Cost: ~$17-18****
+
 - ECS Fargate: ~$15/month
 - S3 Storage (20GB): ~$1/month  
 - VPC Basic: ~$1-2/month
@@ -64,6 +67,7 @@
 ```
 
 **Services:**
+
 - **ECS Fargate**: Separate FastAPI and Celery containers
 - **RDS PostgreSQL**: Managed database service
 - **ElastiCache Redis**: Managed cache service
@@ -71,6 +75,7 @@
 - **VPC**: Public subnets (no NAT Gateway)
 
 **Monthly Cost: ~$59-60** (Currently Deployed Configuration)
+
 - ECS Fargate (2 tasks): ~$15/month
 - RDS PostgreSQL: ~$12/month
 - ElastiCache Redis: ~$11/month
@@ -79,9 +84,10 @@
 - S3 Storage (10GB): ~$0.25-0.50/month
 
 ### Option 3: Production Ready (~$355-705/month)
+
 **Target**: Scalable production environment with high availability
 
-```
+```text
                     ┌─────────────────┐
                     │ Application     │
                     │ Load Balancer   │
@@ -106,6 +112,7 @@
 ```
 
 **Services:**
+
 - **ECS Fargate**: Auto-scaling with ALB
 - **RDS PostgreSQL**: Multi-AZ with read replicas
 - **ElastiCache Redis**: Cluster mode enabled
@@ -118,6 +125,7 @@
 ### ECS Fargate (Container Platform)
 
 #### Purpose
+
 - **Container Orchestration**: Serverless container platform
 - **Auto-Scaling**: Scale based on CPU, memory, or custom metrics
 - **No Server Management**: AWS manages underlying infrastructure
@@ -138,6 +146,7 @@
 #### Task Definitions
 
 **FastAPI Application:**
+
 ```yaml
 Family: youtube-downloader-api
 CPU: 256 (0.25 vCPU) → 2048 (2 vCPU)
@@ -148,6 +157,7 @@ Environment: Production settings
 ```
 
 **Celery Worker:**
+
 ```yaml
 Family: youtube-downloader-worker  
 CPU: 256 (0.25 vCPU) → 4096 (4 vCPU)
@@ -159,11 +169,13 @@ Environment: Worker-specific settings
 #### Auto-Scaling Policies
 
 **Development:**
+
 - Min: 1, Max: 2, Desired: 1
 - Scale up: CPU > 70% for 5 minutes
 - Scale down: CPU < 30% for 10 minutes
 
 **Production:**
+
 - Min: 2, Max: 10, Desired: 3
 - Scale up: CPU > 60% or Queue > 10 jobs
 - Scale down: CPU < 30% and Queue < 2 jobs
@@ -171,6 +183,7 @@ Environment: Worker-specific settings
 ### RDS PostgreSQL (Database)
 
 #### Purpose
+
 - **Managed Database**: Automated backups, patching, monitoring
 - **High Availability**: Multi-AZ deployment for failover
 - **Performance**: Read replicas for scaling
@@ -189,12 +202,14 @@ Environment: Worker-specific settings
 #### Configuration Recommendations
 
 **Development:**
+
 - Instance: db.t3.micro
 - Storage: 20GB General Purpose SSD
 - Backup: 7-day retention
 - Single AZ deployment
 
 **Production:**
+
 - Instance: db.t3.small+ (based on load)
 - Storage: 100GB+ General Purpose SSD
 - Backup: 30-day retention
@@ -202,6 +217,7 @@ Environment: Worker-specific settings
 - Read replicas for scaling
 
 #### Connection Pooling
+
 - Use PgBouncer or application-level pooling
 - Recommended: 100-200 connections for db.t3.small
 - Monitor: DatabaseConnections CloudWatch metric
@@ -209,6 +225,7 @@ Environment: Worker-specific settings
 ### ElastiCache Redis (Cache Layer)
 
 #### Purpose
+
 - **Session Storage**: API key cache, user sessions
 - **Job Queue**: Celery broker and result backend  
 - **Application Cache**: Frequently accessed data
@@ -227,12 +244,14 @@ Environment: Worker-specific settings
 #### Configuration Options
 
 **Development:**
+
 - Node: cache.t3.micro
 - Deployment: Single node
 - Backup: Disabled
 - Cluster Mode: Disabled
 
 **Production:**
+
 - Node: cache.t3.small+
 - Deployment: Multi-AZ with failover
 - Backup: Daily snapshots
@@ -241,6 +260,7 @@ Environment: Worker-specific settings
 ### S3 + CloudFront (Storage & CDN)
 
 #### S3 Storage Purpose
+
 - **Video Files**: Downloaded MP4/WebM files
 - **Transcripts**: SRT, VTT, TXT files
 - **Static Assets**: Thumbnails, metadata
@@ -258,11 +278,13 @@ Environment: Worker-specific settings
 #### CloudFront CDN
 
 **Development**: Skip CDN (direct S3 access)
+
 - Cost: $0
 - Latency: Higher for global users
 - Bandwidth: Direct S3 transfer costs
 
 **Production**: Global CDN
+
 - Cost: $0.085-0.25 per GB transferred
 - Latency: Global edge locations
 - Bandwidth: Reduced origin requests
@@ -272,7 +294,8 @@ Environment: Worker-specific settings
 #### VPC Configuration
 
 **Development:**
-```
+
+```text
 - Public Subnets: 2 AZs
 - Private Subnets: None
 - NAT Gateway: None (cost saving)
@@ -281,7 +304,8 @@ Environment: Worker-specific settings
 ```
 
 **Production:**
-```
+
+```text
 - Public Subnets: 2 AZs (ALB)
 - Private Subnets: 2 AZs (ECS, RDS)
 - NAT Gateway: 2 (Multi-AZ)
@@ -292,11 +316,13 @@ Environment: Worker-specific settings
 #### Application Load Balancer (ALB)
 
 **Development**: Skip ALB
+
 - Access: Direct ECS service endpoints
 - Cost: $0
 - Features: No SSL termination, path-based routing
 
 **Production**: ALB Required
+
 - Cost: ~$18/month base + $0.008/LCU-hour
 - Features: SSL termination, health checks, auto-scaling integration
 - Security: WAF integration, DDoS protection
@@ -306,6 +332,7 @@ Environment: Worker-specific settings
 ### When to Upgrade Each Service
 
 #### ECS Fargate Scaling Triggers
+
 | Metric | Dev → Production | Scale Up Within Prod |
 |--------|------------------|----------------------|
 | **CPU Usage** | >80% sustained | >70% for 5min |
@@ -314,6 +341,7 @@ Environment: Worker-specific settings
 | **Response Time** | >2 seconds | >1 second |
 
 #### Database Scaling Triggers
+
 | Metric | Upgrade Instance | Add Read Replica |
 |--------|------------------|------------------|
 | **CPU Usage** | >70% sustained | >60% on reads |
@@ -322,6 +350,7 @@ Environment: Worker-specific settings
 | **IOPS** | Consistent throttling | High read IOPS |
 
 #### Cache Scaling Triggers
+
 | Metric | Upgrade Node | Enable Cluster |
 |--------|--------------|----------------|
 | **Memory Usage** | >80% used | >70% on single node |
@@ -331,7 +360,8 @@ Environment: Worker-specific settings
 ### Cost Break-Even Analysis
 
 #### Traffic-Based Scaling
-```
+
+```text
 Light Usage (0-1000 downloads/day):
 - Ultra-Minimal: $17/month
 - Optimal Dev: $40/month  
@@ -351,7 +381,8 @@ Heavy Usage (10000+ downloads/day):
 ## Terraform Module Structure
 
 ### Recommended Organization
-```
+
+```text
 infrastructure/
 ├── terraform/
 │   ├── environments/
@@ -386,6 +417,7 @@ infrastructure/
 ### Environment Configuration Strategy
 
 #### Development Variables
+
 ```hcl
 # dev/terraform.tfvars
 environment = "dev"
@@ -398,6 +430,7 @@ enable_cloudfront = false
 ```
 
 #### Production Variables  
+
 ```hcl
 # prod/terraform.tfvars
 environment = "prod"
@@ -410,6 +443,7 @@ enable_cloudfront = true
 ```
 
 ### Shared Module Parameters
+
 ```hcl
 variable "environment" {
   description = "Environment name (dev/staging/prod)"
@@ -440,18 +474,21 @@ variable "feature_flags" {
 ## Implementation Recommendations
 
 ### Phase 1: Start with Optimal Development
+
 1. **Low Risk**: Manageable complexity and cost
 2. **Learning**: Experience with core AWS services
 3. **Scalable**: Clear path to production
 4. **Cost Effective**: ~$40/month provides real managed services
 
 ### Phase 2: Add Production Features Gradually
+
 1. **Multi-AZ**: Add database redundancy
 2. **Load Balancer**: Add ALB for traffic distribution
 3. **Auto-scaling**: Implement dynamic scaling
 4. **CDN**: Add CloudFront for global delivery
 
 ### Phase 3: Advanced Production Features
+
 1. **Monitoring**: CloudWatch dashboards and alarms
 2. **Security**: WAF, VPC Flow Logs, GuardDuty
 3. **Performance**: Read replicas, ElastiCache clustering
@@ -460,12 +497,14 @@ variable "feature_flags" {
 ## Current Implementation Status
 
 **Completed (Phase 6G)**: The "Optimal Development" configuration has been successfully deployed to AWS:
+
 - All infrastructure components operational
 - FastAPI and Celery services running on ECS Fargate
 - Bootstrap endpoint implemented for production API key management
 - Load balancer health checks passing
 
 **Next Steps**: See [SUB-TASKS.md](SUB-TASKS.md) for:
+
 - Current deployment status details
 - End-to-end testing procedures
 - Production upgrade path (Phase 6H)
