@@ -41,6 +41,11 @@ variable "bootstrap_token_parameter" {
   type        = string
 }
 
+variable "s3_bucket_name" {
+  description = "S3 bucket name for application configuration"
+  type        = string
+}
+
 # Container Images
 variable "app_image" {
   description = "Docker image for FastAPI application"

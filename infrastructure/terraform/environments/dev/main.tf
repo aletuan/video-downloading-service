@@ -146,6 +146,7 @@ module "compute" {
   subnet_ids              = module.networking.public_subnet_ids
   security_group_id       = module.networking.ecs_security_group_id
   s3_bucket_arn          = module.storage.s3_bucket_arn
+  s3_bucket_name         = module.storage.s3_bucket_name
   database_url_parameter  = aws_ssm_parameter.database_url.name
   redis_url_parameter     = aws_ssm_parameter.redis_url.name
   bootstrap_token_parameter = aws_ssm_parameter.bootstrap_token.name

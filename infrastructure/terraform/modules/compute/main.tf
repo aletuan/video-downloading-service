@@ -191,6 +191,10 @@ resource "aws_ecs_task_definition" "app" {
         {
           name  = "DEBUG"
           value = var.environment == "dev" ? "true" : "false"
+        },
+        {
+          name  = "S3_BUCKET_NAME"
+          value = var.s3_bucket_name
         }
       ]
       
@@ -258,6 +262,10 @@ resource "aws_ecs_task_definition" "worker" {
         {
           name  = "DEBUG"
           value = var.environment == "dev" ? "true" : "false"
+        },
+        {
+          name  = "S3_BUCKET_NAME"
+          value = var.s3_bucket_name
         }
       ]
       
