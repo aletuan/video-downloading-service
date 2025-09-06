@@ -12,7 +12,7 @@ from app.core.security_middleware import add_security_middleware
 from app.core.auth import require_authentication
 
 # Import routers
-from app.routers import downloads, websocket, admin
+from app.routers import downloads, websocket, admin, bootstrap
 
 # Configure logging
 logging.basicConfig(
@@ -124,6 +124,7 @@ if settings.environment == "localhost":
     logger.info(f"Static file serving enabled at /files -> {downloads_path}")
 
 # Include routers
+app.include_router(bootstrap.router, prefix="/api/v1", tags=["bootstrap"])  # No auth required for bootstrap
 app.include_router(downloads.router, prefix="/api/v1", tags=["downloads"])
 app.include_router(websocket.router, prefix="/ws", tags=["websocket"])
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
