@@ -5,6 +5,7 @@
 The API uses **API key authentication** for secure access. All endpoints (except health checks) require a valid API key.
 
 ### Permission Levels
+
 - **READ_ONLY**: Can access status, job listings, and video info endpoints
 - **DOWNLOAD**: Can create download jobs and access all read operations  
 - **ADMIN**: Can manage API keys and access all endpoints
@@ -37,22 +38,26 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 ## Endpoints
 
 ### Public Endpoints (No Authentication)
+
 - `GET /health` - Basic health check
 - `GET /health/detailed` - Comprehensive system health
 - `GET /api/v1/info?url={youtube_url}` - Extract video information without downloading
 
 ### Bootstrap Endpoints (Setup Only)
+
 - `GET /api/v1/bootstrap/status` - Check if system needs initial setup
 - `POST /api/v1/bootstrap/admin-key` - Create initial admin API key (one-time setup)
 
 ### Protected Endpoints (Require Authentication)
+
 - `POST /api/v1/download` - Start a new download job (DOWNLOAD permission required)
 - `GET /api/v1/status/{job_id}` - Get job status and details (READ_ONLY permission required)
-- `GET /api/v1/jobs` - List all download jobs with pagination (READ_ONLY permission required) 
+- `GET /api/v1/jobs` - List all download jobs with pagination (READ_ONLY permission required)
 - `POST /api/v1/retry/{job_id}` - Retry a failed download job (DOWNLOAD permission required)
 - `WS /ws/progress/{job_id}?api_key={key}` - WebSocket for real-time progress updates
 
 ### Admin Endpoints (ADMIN Permission Required)
+
 - `POST /api/v1/admin/api-keys` - Create new API key
 - `GET /api/v1/admin/api-keys` - List all API keys
 - `GET /api/v1/admin/api-keys/{key_id}` - Get specific API key details
@@ -64,11 +69,13 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 ### Bootstrap Setup (First-time Setup)
 
 #### Check if system needs setup
+
 ```bash
 curl "http://localhost:8000/api/v1/bootstrap/status"
 ```
 
 #### Create initial admin API key (one-time setup)
+
 ```bash
 curl -X POST "http://localhost:8000/api/v1/bootstrap/admin-key" \
      -H "Content-Type: application/json" \
@@ -80,17 +87,20 @@ curl -X POST "http://localhost:8000/api/v1/bootstrap/admin-key" \
 ```
 
 **Important Notes:**
+
 - This endpoint only works when **no admin keys exist** in the database
 - Requires `BOOTSTRAP_SETUP_TOKEN` environment variable
 - **Auto-disables** after creating the first admin key
 - Use the returned API key to create additional keys via admin endpoints
 
 ### Extract video information (public endpoint)
+
 ```bash
 curl "http://localhost:8000/api/v1/info?url=https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 ```
 
 ### Start a download with authentication
+
 ```bash
 curl -X POST "http://localhost:8000/api/v1/download" \
      -H "Content-Type: application/json" \
@@ -105,18 +115,21 @@ curl -X POST "http://localhost:8000/api/v1/download" \
 ```
 
 ### Check job status with API key
+
 ```bash
 curl -H "X-API-Key: your-api-key-here" \
      "http://localhost:8000/api/v1/status/{job_id}"
 ```
 
 ### List all jobs with filtering and authentication
+
 ```bash
 curl -H "X-API-Key: your-api-key-here" \
      "http://localhost:8000/api/v1/jobs?status=completed&page=1&per_page=10"
 ```
 
 ### Retry a failed job with authentication
+
 ```bash
 curl -X POST \
      -H "X-API-Key: your-api-key-here" \
@@ -124,11 +137,13 @@ curl -X POST \
 ```
 
 ### Connect to WebSocket with authentication
+
 ```bash
 wscat -c "ws://localhost:8000/ws/progress/{job_id}?api_key=your-api-key-here"
 ```
 
 ### Admin: Create a new API key
+
 ```bash
 curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
      -H "Content-Type: application/json" \
@@ -144,6 +159,7 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 ## API Response Examples
 
 ### Video Information Response
+
 ```json
 {
   "status": "success",
@@ -176,6 +192,7 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 ```
 
 ### Download Job Creation Response
+
 ```json
 {
   "status": "accepted",
@@ -193,6 +210,7 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 ### Job Status Response
 
 #### Queued Job
+
 ```json
 {
   "status": "success",
@@ -213,6 +231,7 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 ```
 
 #### In Progress Job
+
 ```json
 {
   "status": "success", 
@@ -239,6 +258,7 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 ```
 
 #### Completed Job
+
 ```json
 {
   "status": "success",
@@ -279,6 +299,7 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 ```
 
 #### Failed Job
+
 ```json
 {
   "status": "success",
@@ -304,6 +325,7 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 ```
 
 ### Job Listing Response
+
 ```json
 {
   "status": "success",
@@ -343,6 +365,7 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 ```
 
 ### API Key Creation Response
+
 ```json
 {
   "status": "success",
@@ -365,6 +388,7 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 ### WebSocket Progress Messages
 
 #### Connection Established
+
 ```json
 {
   "type": "connection",
@@ -376,6 +400,7 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 ```
 
 #### Progress Update
+
 ```json
 {
   "type": "progress",
@@ -390,6 +415,7 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 ```
 
 #### Status Change
+
 ```json
 {
   "type": "status",
@@ -405,6 +431,7 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 ```
 
 #### Error Message
+
 ```json
 {
   "type": "error",
@@ -422,6 +449,7 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 ## Error Responses
 
 ### Authentication Errors
+
 ```json
 {
   "status": "error",
@@ -435,6 +463,7 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 ```
 
 ### Rate Limiting
+
 ```json
 {
   "status": "error", 
@@ -449,6 +478,7 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 ```
 
 ### Validation Errors
+
 ```json
 {
   "status": "error",
@@ -465,6 +495,7 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 ```
 
 ### Resource Not Found
+
 ```json
 {
   "status": "error",
@@ -480,5 +511,6 @@ curl -X POST "http://localhost:8000/api/v1/admin/api-keys" \
 ## Interactive Documentation
 
 Once running, access the interactive API documentation at:
-- **Swagger UI**: http://localhost:8000/api/docs
-- **ReDoc**: http://localhost:8000/api/redoc
+
+- **Swagger UI**: <http://localhost:8000/api/docs>
+- **ReDoc**: <http://localhost:8000/api/redoc>

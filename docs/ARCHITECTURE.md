@@ -29,6 +29,7 @@
 ## Design Patterns
 
 ### Core Design Pattern
+
 This is a **FastAPI-based microservice** with **async-first architecture** using the **Repository and Factory patterns**. The service follows a **clean architecture** approach with clear separation between layers.
 
 ### Key Architectural Decisions
@@ -46,29 +47,38 @@ This is a **FastAPI-based microservice** with **async-first architecture** using
 ## Implementation Details
 
 ### Dual Database Support
+
 The application works with both SQLite (development) and PostgreSQL (production). Alembic migrations automatically convert async URLs to sync for migration execution.
 
 ### Health Monitoring
+
 Multiple health check endpoints exist:
+
 - `/health` - Basic status
 - `/health/detailed` - Full system health with database and storage validation
 - Celery worker health checks via `health_check` task
 
 ### Configuration Management
+
 Settings use **Pydantic Settings** with automatic environment variable loading. The `model_config = SettingsConfigDict(env_file=".env")` pattern is used instead of the deprecated `class Config`.
 
 ### Async Everywhere
+
 All database operations, file I/O, and HTTP requests use async/await. The storage layer uses `aiofiles` for async file operations and `asyncio.run_in_executor()` for blocking operations like S3 calls. Celery tasks use `asyncio.run()` to execute async download operations in background workers.
 
 ### API Structure
+
 The FastAPI application uses a modular router-based structure:
+
 - `app/routers/downloads.py` - Download management endpoints
 - `app/routers/admin.py` - API key management endpoints  
 - `app/routers/bootstrap.py` - Initial setup endpoints
 - `app/routers/websocket.py` - WebSocket connections with `WebSocketManager`
 
 ### Authentication & Authorization
+
 Comprehensive API key-based authentication system with:
+
 - **Permission Levels**: READ_ONLY, DOWNLOAD, ADMIN, FULL_ACCESS
 - **Rate Limiting**: Redis-based rate limiting per API key
 - **Bootstrap Setup**: One-time admin key creation for initial setup
@@ -84,15 +94,19 @@ Comprehensive API key-based authentication system with:
 ## Development Notes
 
 ### Port Conflicts
+
 Docker Compose uses non-standard ports (5433 for PostgreSQL, 6380 for Redis) to avoid conflicts with locally running services.
 
 ### Container Communication
+
 Services communicate using Docker network names (`db`, `redis`) rather than localhost.
 
 ### Migration Strategy
+
 Database tables are created both via application startup (SQLAlchemy) and Alembic migrations. Use `alembic stamp head` to sync migration state if tables already exist.
 
 ### Storage Testing
+
 The health check performs actual file write/read/delete operations to validate storage functionality, not just connection tests.
 
 Run health checks at `http://localhost:8000/health/detailed` (local) or your ALB endpoint (AWS) to verify all systems are operational.
