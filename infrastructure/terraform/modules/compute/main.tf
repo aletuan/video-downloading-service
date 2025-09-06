@@ -202,6 +202,10 @@ resource "aws_ecs_task_definition" "app" {
         {
           name      = "REDIS_URL" 
           valueFrom = var.redis_url_parameter
+        },
+        {
+          name      = "BOOTSTRAP_SETUP_TOKEN"
+          valueFrom = var.bootstrap_token_parameter
         }
       ]
       

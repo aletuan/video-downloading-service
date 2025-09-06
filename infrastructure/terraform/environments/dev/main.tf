@@ -128,6 +128,15 @@ resource "aws_ssm_parameter" "redis_url" {
   tags = local.common_tags
 }
 
+resource "aws_ssm_parameter" "bootstrap_token" {
+  name        = "/${var.project_name}/${local.environment}/bootstrap/setup-token"
+  description = "Bootstrap setup token for creating initial admin API key"
+  type        = "SecureString"
+  value       = "dev-bootstrap-token-12345"
+
+  tags = local.common_tags
+}
+
 # Compute Module
 module "compute" {
   source = "../../modules/compute"
@@ -139,6 +148,7 @@ module "compute" {
   s3_bucket_arn          = module.storage.s3_bucket_arn
   database_url_parameter  = aws_ssm_parameter.database_url.name
   redis_url_parameter     = aws_ssm_parameter.redis_url.name
+  bootstrap_token_parameter = aws_ssm_parameter.bootstrap_token.name
   
   # Container Images (will need to be built and pushed to ECR)
   app_image    = var.app_image

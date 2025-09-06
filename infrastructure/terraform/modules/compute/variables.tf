@@ -36,6 +36,11 @@ variable "redis_url_parameter" {
   type        = string
 }
 
+variable "bootstrap_token_parameter" {
+  description = "Systems Manager parameter name for bootstrap setup token"
+  type        = string
+}
+
 # Container Images
 variable "app_image" {
   description = "Docker image for FastAPI application"

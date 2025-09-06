@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     api_key_header: str = "X-API-Key"
     
     # Bootstrap/Setup
-    bootstrap_setup_token: str = secrets.token_urlsafe(32)
+    bootstrap_setup_token: Optional[str] = None
     
     model_config = SettingsConfigDict(env_file=".env")
 
