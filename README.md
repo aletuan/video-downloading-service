@@ -22,7 +22,7 @@ The YouTube Video Download Service is a production-ready, cloud-native applicati
 - **Health Monitoring** - Comprehensive health checks for all system components
 - **Docker Ready** - Complete containerization for development and deployment
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
@@ -46,7 +46,7 @@ The YouTube Video Download Service is a production-ready, cloud-native applicati
 | **Redis** | Message broker for Celery and caching layer |
 | **Storage Handler** | Abstraction layer supporting Local filesystem and AWS S3 |
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -98,7 +98,8 @@ curl -X POST "http://localhost:8000/api/v1/download" \
 
 - **[API Documentation](docs/API.md)** - Complete API reference, authentication, and examples
 - **[Development Guide](docs/DEVELOPMENT.md)** - Setup, testing, and development workflow
-- **[Deployment Guide](docs/DEPLOYMENT.md)** - AWS deployment and production setup
+- **[AWS Infrastructure Guide](docs/AWS-INFRASTRUCTURE.md)** - Architecture planning, service configurations, and scaling strategies
+- **[Deployment Operations](docs/SUB-TASKS.md)** - Operational procedures, current status, and deployment commands
 - **[Architecture](docs/ARCHITECTURE.md)** - Technical architecture and design patterns
 
 ### Interactive API Docs
@@ -126,39 +127,39 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Issues**: Report bugs on [GitHub Issues](https://github.com/andy/video-downloading-service/issues)
 - **Discussions**: Join the conversation in [GitHub Discussions](https://github.com/andy/video-downloading-service/discussions)
 
-## 🚀 Roadmap
+## Roadmap
 
-### Phase 1: ✅ Core Infrastructure (COMPLETED)
+### Phase 1: Core Infrastructure (COMPLETED)
 - FastAPI application with async support
 - Database layer with SQLAlchemy
 - Storage abstraction (Local/S3)
 - Docker development environment
 
-### Phase 2: ✅ Core Download Engine (COMPLETED)
+### Phase 2: Core Download Engine (COMPLETED)
 - YouTube downloader implementation with yt-dlp
 - Format selection and quality options
 - Progress tracking and error handling
 - Background job processing with Celery
 
-### Phase 3: ✅ API Layer (COMPLETED)
+### Phase 3: API Layer (COMPLETED)
 - Complete REST API with 6 endpoints
 - Real-time WebSocket progress updates
 - Request/response validation with Pydantic
 - API documentation with OpenAPI/Swagger
 
-### Phase 4: ✅ Authentication & Security (COMPLETED)
+### Phase 4: Authentication & Security (COMPLETED)
 - API key authentication with permission levels
 - Rate limiting with Redis
 - Security middleware and headers
 - Input validation and sanitization
 - Admin API for key management
 
-### Phase 5: ✅ Environment Configuration (COMPLETED)
+### Phase 5: Environment Configuration (COMPLETED)
 - Local development setup with Docker
 - Database migrations and health checks
 - Production-ready containerization
 
-### Phase 6: 🎯 AWS Production Setup (Next)
+### Phase 6: AWS Production Setup (Next)
 - ECS/Fargate deployment with Terraform
 - RDS PostgreSQL and ElastiCache Redis
 - S3 storage with CloudFront CDN
