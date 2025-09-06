@@ -27,6 +27,11 @@ elif "postgresql+asyncpg" in database_url:
     # Convert async PostgreSQL URL to sync for Alembic  
     database_url = database_url.replace("postgresql+asyncpg", "postgresql")
 
+# Convert SSL parameter for psycopg2 compatibility
+# asyncpg uses 'ssl=require' but psycopg2 uses 'sslmode=require'
+if "ssl=require" in database_url:
+    database_url = database_url.replace("ssl=require", "sslmode=require")
+
 config.set_main_option("sqlalchemy.url", database_url)
 
 # Interpret the config file for Python logging.

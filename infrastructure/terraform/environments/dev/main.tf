@@ -249,7 +249,7 @@ resource "null_resource" "database_migration" {
       MIGRATION_TASK=$(aws ecs run-task \
         --cluster "$CLUSTER_NAME" \
         --task-definition "$TASK_DEF_ARN" \
-        --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_LIST],assignPublicIp=ENABLED}" \
+        --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_LIST],securityGroups=[${module.networking.ecs_security_group_id}],assignPublicIp=ENABLED}" \
         --overrides '{"containerOverrides":[{"name":"fastapi-app","command":["alembic","upgrade","head"]}]}' \
         --launch-type FARGATE \
         --query 'tasks[0].taskArn' \
@@ -362,7 +362,7 @@ asyncio.run(create_tables())
       TABLE_TASK=$(aws ecs run-task \
         --cluster "$CLUSTER_NAME" \
         --task-definition "$TASK_DEF_ARN" \
-        --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_LIST],assignPublicIp=ENABLED}" \
+        --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_LIST],securityGroups=[${module.networking.ecs_security_group_id}],assignPublicIp=ENABLED}" \
         --overrides "{\"containerOverrides\":[{\"name\":\"fastapi-app\",\"command\":[\"python\",\"-c\",\"$(echo "$PYTHON_SCRIPT" | sed 's/"/\\"/g')\"]}]}" \
         --launch-type FARGATE \
         --query 'tasks[0].taskArn' \
