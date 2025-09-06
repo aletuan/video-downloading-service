@@ -19,9 +19,16 @@ sync_session_factory: Optional[sessionmaker[Session]] = None
 
 def get_sync_database_url(async_url: str) -> str:
     """Convert async database URL to sync version for Celery tasks."""
-    return (async_url
-            .replace("sqlite+aiosqlite://", "sqlite://")
-            .replace("postgresql+asyncpg://", "postgresql+psycopg2://"))
+    sync_url = (async_url
+                .replace("sqlite+aiosqlite://", "sqlite://")
+                .replace("postgresql+asyncpg://", "postgresql+psycopg2://"))
+    
+    # Convert SSL parameter for psycopg2 compatibility
+    # asyncpg uses 'ssl=require' but psycopg2 uses 'sslmode=require'
+    if "ssl=require" in sync_url:
+        sync_url = sync_url.replace("ssl=require", "sslmode=require")
+    
+    return sync_url
 
 
 def create_database_engine() -> AsyncEngine:

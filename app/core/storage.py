@@ -506,7 +506,7 @@ def get_storage_handler() -> StorageHandler:
         StorageHandler: Configured storage handler instance
     """
     try:
-        if settings.environment == "aws":
+        if settings.environment in ["aws", "dev", "staging", "production"]:
             # AWS/Production environment - use S3
             if not hasattr(settings, 's3_bucket_name') or not settings.s3_bucket_name:
                 logger.warning("S3 bucket not configured, falling back to local storage")

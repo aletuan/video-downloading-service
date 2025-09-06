@@ -172,7 +172,7 @@ def process_download(self, job_id: str, url: str, options: dict):
                 view_count=metadata.get('view_count'),
                 like_count=metadata.get('like_count'),
                 video_path=result.get('video_path'),
-                transcription_path=result.get('subtitle_paths', [None])[0],
+                transcription_path=result.get('subtitle_paths', [None])[0] if result.get('subtitle_paths') else None,
                 thumbnail_path=result.get('thumbnail_path'),
                 file_size=result.get('file_size', 0),
                 progress=100.0

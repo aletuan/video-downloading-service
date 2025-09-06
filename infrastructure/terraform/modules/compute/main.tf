@@ -186,11 +186,15 @@ resource "aws_ecs_task_definition" "app" {
       environment = [
         {
           name  = "ENVIRONMENT"
-          value = var.environment
+          value = "aws"
         },
         {
           name  = "DEBUG"
           value = var.environment == "dev" ? "true" : "false"
+        },
+        {
+          name  = "S3_BUCKET_NAME"
+          value = var.s3_bucket_name
         }
       ]
       
@@ -202,6 +206,10 @@ resource "aws_ecs_task_definition" "app" {
         {
           name      = "REDIS_URL" 
           valueFrom = var.redis_url_parameter
+        },
+        {
+          name      = "BOOTSTRAP_SETUP_TOKEN"
+          valueFrom = var.bootstrap_token_parameter
         }
       ]
       
@@ -249,11 +257,15 @@ resource "aws_ecs_task_definition" "worker" {
       environment = [
         {
           name  = "ENVIRONMENT"
-          value = var.environment
+          value = "aws"
         },
         {
           name  = "DEBUG"
           value = var.environment == "dev" ? "true" : "false"
+        },
+        {
+          name  = "S3_BUCKET_NAME"
+          value = var.s3_bucket_name
         }
       ]
       

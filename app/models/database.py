@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float
+from sqlalchemy.types import TIMESTAMP
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
@@ -34,7 +35,7 @@ class DownloadJob(Base):
     title = Column(String)
     duration = Column(Integer)  # Duration in seconds
     channel_name = Column(String)
-    upload_date = Column(DateTime)
+    upload_date = Column(TIMESTAMP(timezone=True))
     view_count = Column(Integer)
     like_count = Column(Integer)
     
@@ -56,9 +57,9 @@ class DownloadJob(Base):
     audio_codec = Column(String)
     
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    started_at = Column(DateTime)
-    completed_at = Column(DateTime)
+    created_at = Column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    started_at = Column(TIMESTAMP(timezone=True))
+    completed_at = Column(TIMESTAMP(timezone=True))
     
     # Error handling
     error_message = Column(Text)
@@ -182,16 +183,16 @@ class APIKey(Base):
     description = Column(Text)  # Optional description
     
     # Usage tracking
-    last_used_at = Column(DateTime(timezone=True))
+    last_used_at = Column(TIMESTAMP(timezone=True))
     usage_count = Column(Integer, nullable=False, default=0)
     
     # Rate limiting (optional override of default limits)
     custom_rate_limit = Column(Integer)  # Custom requests per minute limit
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    expires_at = Column(DateTime(timezone=True))  # Optional expiration date
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    expires_at = Column(TIMESTAMP(timezone=True))  # Optional expiration date
     
     # Metadata
     created_by = Column(String)  # Who created this API key
