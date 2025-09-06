@@ -11,7 +11,7 @@ import bleach
 from typing import Optional, List, Dict, Any, Union
 from urllib.parse import urlparse, parse_qs
 import validators
-from pydantic import field_validator, model_validator
+from pydantic import field_validator, model_validator, validator
 import logging
 
 logger = logging.getLogger(__name__)
