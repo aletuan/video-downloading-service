@@ -9,9 +9,9 @@ yt-dlp>=2025.8.27
 boto3==1.29.7
 
 # Database
-sqlalchemy[asyncio]==2.0.23
-asyncpg==0.29.0
-# psycopg2-binary==2.9.9  # Removed - conflicts with async operations, use asyncpg instead
+sqlalchemy[asyncio]>=2.0.23
+asyncpg==0.29.0  # For async database operations
+psycopg2-binary==2.9.9  # Required for Alembic migrations (sync operations)
 alembic==1.13.1
 
 # Background Tasks
