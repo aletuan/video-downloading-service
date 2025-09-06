@@ -132,7 +132,7 @@ deploy_module() {
 # Deploy all infrastructure phases
 deploy_all_phases() {
     log "Starting complete AWS infrastructure deployment..."
-    log "Following SUB-TASKS.md Phase 6 deployment strategy"
+    log "Following SUB-TASKS.md Phase 6 deployment strategy (6A-6H)"
     
     # Phase 6A: Core Infrastructure Foundation
     if deploy_module "6A" "networking" "Core Infrastructure Foundation (VPC, Subnets, Security Groups)"; then
@@ -282,6 +282,18 @@ deploy_all_phases() {
         warning "Celery worker service status: $WORKER_STATUS"
     fi
     
+    # Phase 6H: Database Migration (Create tables via Terraform null_resource)
+    log "Phase 6H: Database Migration - Creating tables via Terraform null_resource"
+    cd "$TERRAFORM_DIR"
+    
+    if terraform apply -target=null_resource.database_migration -auto-approve; then
+        success "✅ Phase 6H: Database migration completed successfully"
+        log "Database tables (api_keys, download_jobs, alembic_version) created"
+    else
+        warning "⚠️  Database migration failed - API endpoints may not work properly"
+        log "You may need to run manually: terraform apply -target=null_resource.database_migration -auto-approve"
+    fi
+    
     # Test ALB health endpoint
     log "Testing ALB health endpoint..."
     ALB_ENDPOINT=$(terraform output -raw alb_endpoint 2>/dev/null)
@@ -302,7 +314,7 @@ deploy_all_phases() {
     
     success "🎉 All phases deployed successfully!"
     success "✅ Phase 6G: Production Application Deployment completed!"
-    success "✅ Database migration handled by Terraform null_resource"
+    success "✅ Phase 6H: Database Migration completed!"
 }
 
 # Show deployment summary
@@ -424,7 +436,7 @@ main() {
     echo ""
     log "🚀 AWS Infrastructure Deployment Script"
     log "Orchestrates Terraform deployment across all modules"
-    log "Deploys: VPC → Storage → Database → Queue → LoadBalancer → Compute → Application"
+    log "Deploys: VPC → Storage → Database → Queue → LoadBalancer → Compute → Application → Migration"
     echo ""
     
     # Handle command line arguments
