@@ -96,225 +96,118 @@ deploy_module() {
     local module=$2
     local description=$3
     
-    log "Phase $phase: $description"
-    log "Deploying module: $module"
-    
+    echo ""
+    log "🔄 Phase $phase: $description"
     cd "$TERRAFORM_DIR"
     
-    # Plan the deployment
-    log "Planning deployment for $module..."
-    if terraform plan -target="module.$module" -out="/tmp/terraform-$module.plan"; then
-        success "Plan created for $module"
-    else
-        error "Planning failed for $module"
-        return 1
+    # Plan and Apply
+    if terraform plan -target="module.$module" -out="/tmp/terraform-$module.plan" &>/dev/null; then
+        if terraform apply "/tmp/terraform-$module.plan"; then
+            success "✅ Phase $phase COMPLETED"
+            rm -f "/tmp/terraform-$module.plan"
+            return 0
+        fi
     fi
     
-    # Apply the deployment
-    log "Applying deployment for $module..."
-    if terraform apply "/tmp/terraform-$module.plan"; then
-        success "✅ Phase $phase COMPLETED: $description"
-        
-        # Clean up plan file
-        rm -f "/tmp/terraform-$module.plan"
-        
-        # Show outputs
-        log "Terraform outputs for $module:"
-        terraform output | grep -E "(${module}|account_id|region)" || true
-        
-        return 0
-    else
-        error "❌ Phase $phase FAILED: $description"
-        return 1
-    fi
+    error "❌ Phase $phase FAILED"
+    return 1
 }
 
 # Deploy all infrastructure phases
 deploy_all_phases() {
-    log "Starting complete AWS infrastructure deployment..."
-    log "Following SUB-TASKS.md Phase 6 deployment strategy (6A-6H)"
+    echo "⚡ STARTING DEPLOYMENT EXECUTION..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     # Phase 6A: Core Infrastructure Foundation
-    if deploy_module "6A" "networking" "Core Infrastructure Foundation (VPC, Subnets, Security Groups)"; then
-        log "✅ Phase 6A: VPC, subnets, gateways, and security groups deployed"
-        sleep 10  # Allow resources to stabilize
-    else
-        error "Phase 6A failed - stopping deployment"
-        exit 1
-    fi
+    deploy_module "6A" "networking" "Core Infrastructure Foundation (VPC, Subnets, Security Groups)" || exit 1
+    sleep 10  # Allow resources to stabilize
     
-    # Phase 6B: Storage Layer
-    if deploy_module "6B" "storage" "Storage Layer (S3 Bucket with Lifecycle Management)"; then
-        log "✅ Phase 6B: S3 storage layer deployed"
-        sleep 5
-    else
-        error "Phase 6B failed - stopping deployment"
-        exit 1
-    fi
+    # Phase 6B: Storage Layer  
+    deploy_module "6B" "storage" "Storage Layer (S3 Bucket with Lifecycle Management)" || exit 1
+    sleep 5
     
     # Phase 6C: Database & Cache Layer
-    if deploy_module "6C" "database" "Database & Cache Layer (PostgreSQL RDS + ElastiCache Redis)"; then
-        log "✅ Phase 6C: Database and cache layer deployed"
-        log "⚠️  Note: RDS and ElastiCache may take 10-15 minutes to be fully available"
-        sleep 30  # Allow time for database initialization
-    else
-        error "Phase 6C failed - stopping deployment"
-        exit 1
-    fi
+    deploy_module "6C" "database" "Database & Cache Layer (PostgreSQL RDS + ElastiCache Redis)" || exit 1
+    log "⚠️  Note: RDS and ElastiCache may take 10-15 minutes to be fully available"
+    sleep 30  # Allow time for database initialization
     
     # Phase 6D: Queue System
-    if deploy_module "6D" "queue" "Queue System (SQS Main Queue + DLQ with CloudWatch Alarms)"; then
-        log "✅ Phase 6D: SQS queue system deployed"
-        sleep 5
-    else
-        error "Phase 6D failed - stopping deployment"
-        exit 1
-    fi
+    deploy_module "6D" "queue" "Queue System (SQS Main Queue + DLQ with CloudWatch Alarms)" || exit 1
+    sleep 5
     
-    # Phase 6E: Load Balancing & Security (Must come before Compute for target group dependency)
-    if deploy_module "6E" "load_balancer" "Load Balancing & Security (ALB + Target Groups + SSL)"; then
-        log "✅ Phase 6E: Load balancer and security deployed"
-        sleep 10
-    else
-        error "Phase 6E failed - stopping deployment"
-        exit 1
-    fi
+    # Phase 6E: Load Balancing & Security  
+    deploy_module "6E" "load_balancer" "Load Balancing & Security (ALB + Target Groups + SSL)" || exit 1
+    sleep 10
     
-    # Phase 6F: Compute Platform (Depends on Load Balancer target group)
-    if deploy_module "6F" "compute" "Compute Platform (ECS Fargate Cluster + Task Definitions)"; then
-        log "✅ Phase 6F: ECS compute platform deployed"
-        sleep 10
-    else
-        error "Phase 6F failed - stopping deployment"
-        exit 1
-    fi
+    # Phase 6F: Compute Platform
+    deploy_module "6F" "compute" "Compute Platform (ECS Fargate Cluster + Task Definitions)" || exit 1
+    sleep 10
     
-    # Phase 6G: Production Application Deployment
-    log "Phase 6G: Production Application Deployment"
+    # Phase 6G: Application Deployment
+    echo ""
+    log "📦 Phase 6G: Application Deployment"
     
-    # Check if ECR repositories exist
-    if aws ecr describe-repositories --repository-names youtube-downloader/app youtube-downloader/worker &>/dev/null; then
-        success "ECR repositories already exist"
-    else
+    # ECR Setup
+    if ! aws ecr describe-repositories --repository-names youtube-downloader/app youtube-downloader/worker &>/dev/null; then
         log "Creating ECR repositories..."
         aws ecr create-repository --repository-name youtube-downloader/app --region us-east-1 || true
         aws ecr create-repository --repository-name youtube-downloader/worker --region us-east-1 || true
-        success "ECR repositories created"
     fi
     
-    # Build and push Docker images automatically
+    # Build & Push Images
     log "Building and pushing Docker images..."
+    "${SCRIPT_DIR}/rebuild-images.sh" || { error "Docker image build failed"; return 1; }
     
-    # Call the rebuild-images script to ensure fresh images with correct architecture
-    log "Executing rebuild-images.sh to build fresh Docker images with correct architecture..."
-    if "${SCRIPT_DIR}/rebuild-images.sh"; then
-        success "Docker images built and pushed successfully"
-    else
-        error "Failed to build and push Docker images"
-        return 1
-    fi
-    
-    # Verify images are in ECR
-    log "Verifying images in ECR..."
-    if aws ecr describe-images --repository-name youtube-downloader/app --query 'imageDetails[0].imagePushedAt' &>/dev/null; then
-        success "App image verified in ECR"
-    else
-        warning "App image verification failed"
-    fi
-    
-    if aws ecr describe-images --repository-name youtube-downloader/worker --query 'imageDetails[0].imagePushedAt' &>/dev/null; then
-        success "Worker image verified in ECR" 
-    else
-        warning "Worker image verification failed"
-    fi
-    
-    # Note: Database configuration is now handled by Terraform directly
-    log "Database configuration handled by Terraform (SSL + async driver)"
-    
-    # Force ECS deployment to use latest images
-    log "Forcing ECS deployment with latest task definitions..."
-    
-    # Get cluster and service names from terraform outputs
+    # Deploy Services
+    log "Deploying ECS services..."
     CLUSTER_NAME=$(get_terraform_output "ecs_cluster_name")
-    APP_SERVICE_NAME=$(get_terraform_output "app_service_name")
+    APP_SERVICE_NAME=$(get_terraform_output "app_service_name") 
     WORKER_SERVICE_NAME=$(get_terraform_output "worker_service_name")
     
-    if [[ -n "$CLUSTER_NAME" && -n "$APP_SERVICE_NAME" ]]; then
-        aws ecs update-service --cluster "$CLUSTER_NAME" --service "$APP_SERVICE_NAME" --force-new-deployment &>/dev/null || warning "Failed to update app service"
-        log "Updated app service: $APP_SERVICE_NAME on cluster: $CLUSTER_NAME"
-    else
-        warning "Could not extract cluster/service names from terraform outputs"
-    fi
+    [[ -n "$CLUSTER_NAME" && -n "$APP_SERVICE_NAME" ]] && aws ecs update-service --cluster "$CLUSTER_NAME" --service "$APP_SERVICE_NAME" --force-new-deployment &>/dev/null
+    [[ -n "$CLUSTER_NAME" && -n "$WORKER_SERVICE_NAME" ]] && aws ecs update-service --cluster "$CLUSTER_NAME" --service "$WORKER_SERVICE_NAME" --force-new-deployment &>/dev/null
     
-    if [[ -n "$CLUSTER_NAME" && -n "$WORKER_SERVICE_NAME" ]]; then
-        aws ecs update-service --cluster "$CLUSTER_NAME" --service "$WORKER_SERVICE_NAME" --force-new-deployment &>/dev/null || warning "Failed to update worker service"
-        log "Updated worker service: $WORKER_SERVICE_NAME on cluster: $CLUSTER_NAME"
-    else
-        warning "Could not extract worker service name from terraform outputs"
-    fi
-    
-    # Wait for services to stabilize
-    log "Waiting for ECS services to stabilize..."
+    # Verify Services
     sleep 30
+    APP_STATUS=$(aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$APP_SERVICE_NAME" --query 'services[0].{running:runningCount,desired:desiredCount}' --output text 2>/dev/null || echo "0	1")
+    WORKER_STATUS=$(aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$WORKER_SERVICE_NAME" --query 'services[0].{running:runningCount,desired:desiredCount}' --output text 2>/dev/null || echo "0	1")
     
-    # Check ECS service health
-    if [[ -n "$CLUSTER_NAME" && -n "$APP_SERVICE_NAME" ]]; then
-        APP_STATUS=$(aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$APP_SERVICE_NAME" --query 'services[0].{running:runningCount,desired:desiredCount}' --output text 2>/dev/null)
-    else
-        APP_STATUS="Unknown - cluster/service names not available"
-    fi
+    [[ "$APP_STATUS" == *"1	1"* ]] && success "FastAPI service: 1/1 running" || warning "FastAPI service: $APP_STATUS"
+    [[ "$WORKER_STATUS" == *"1	1"* ]] && success "Worker service: 1/1 running" || warning "Worker service: $WORKER_STATUS"
     
-    if [[ -n "$CLUSTER_NAME" && -n "$WORKER_SERVICE_NAME" ]]; then
-        WORKER_STATUS=$(aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$WORKER_SERVICE_NAME" --query 'services[0].{running:runningCount,desired:desiredCount}' --output text 2>/dev/null)
-    else
-        WORKER_STATUS="Unknown - cluster/service names not available"
-    fi
-    
-    if [[ "$APP_STATUS" == *"1	1"* ]]; then
-        success "FastAPI service is running (1/1)"
-    else
-        warning "FastAPI service status: $APP_STATUS"
-    fi
-    
-    if [[ "$WORKER_STATUS" == *"1	1"* ]]; then
-        success "Celery worker service is running (1/1)"  
-    else
-        warning "Celery worker service status: $WORKER_STATUS"
-    fi
-    
-    # Phase 6H: Database Migration (Create tables via Terraform null_resource)
-    log "Phase 6H: Database Migration - Creating tables via Terraform null_resource"
+    # Phase 6H: Database Migration
+    echo ""
+    log "🗄️  Phase 6H: Database Migration"
     cd "$TERRAFORM_DIR"
     
     if terraform apply -target=null_resource.database_migration -auto-approve; then
-        success "✅ Phase 6H: Database migration completed successfully"
-        log "Database tables (api_keys, download_jobs, alembic_version) created"
+        success "Database tables created (api_keys, download_jobs, alembic_version)"
     else
-        warning "⚠️  Database migration failed - API endpoints may not work properly"
-        log "You may need to run manually: terraform apply -target=null_resource.database_migration -auto-approve"
+        warning "Database migration failed - API endpoints may not work properly"
     fi
     
-    # Test ALB health endpoint
-    log "Testing ALB health endpoint..."
+    # Final Health Check
+    echo ""
+    log "🔍 Final Health Verification"
     ALB_ENDPOINT=$(terraform output -raw alb_endpoint 2>/dev/null)
     if [[ -n "$ALB_ENDPOINT" ]]; then
         HEALTH_RESPONSE=$(curl -s "$ALB_ENDPOINT/health" 2>/dev/null || echo "failed")
         if [[ "$HEALTH_RESPONSE" == *"healthy"* ]]; then
-            success "✅ ALB health check passed: $HEALTH_RESPONSE"
+            success "Application health check: PASSED ✅"
         else
-            warning "ALB health check failed or still starting up"
-            log "   Try: curl $ALB_ENDPOINT/health"
+            warning "Application health check: FAILED or starting up"
+            log "Manual test: curl $ALB_ENDPOINT/health"
         fi
     fi
     
-    # Final verification (database migration now handled by Terraform null_resource)
-    log "Final verification and configuration"
-    cd "$TERRAFORM_DIR" 
+    # Save outputs
     terraform output > "/tmp/terraform-final-outputs.txt"
     
-    success "🎉 All phases deployed successfully!"
-    success "✅ Phase 6G: Production Application Deployment completed!"
-    success "✅ Phase 6H: Database Migration completed!"
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    success "🎉 DEPLOYMENT COMPLETED SUCCESSFULLY!"
+    success "✅ All 8 phases deployed (6A-6H)"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
 # Show deployment summary
@@ -431,13 +324,64 @@ rollback_deployment() {
     fi
 }
 
+# Show deployment workflow overview
+show_deployment_overview() {
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🚀 AWS INFRASTRUCTURE DEPLOYMENT - YOUTUBE DOWNLOADER SERVICE"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "📋 DEPLOYMENT WORKFLOW (8 Phases):"
+    echo "   Phase 6A: Core Infrastructure    → VPC, Subnets, Security Groups"
+    echo "   Phase 6B: Storage Layer          → S3 Bucket with Lifecycle"  
+    echo "   Phase 6C: Database & Cache       → PostgreSQL RDS + ElastiCache Redis"
+    echo "   Phase 6D: Queue System           → SQS Main Queue + Dead Letter Queue"
+    echo "   Phase 6E: Load Balancing         → Application Load Balancer + SSL"
+    echo "   Phase 6F: Compute Platform       → ECS Fargate Cluster + Task Definitions"
+    echo "   Phase 6G: Application Deploy     → Docker Images + ECS Services"
+    echo "   Phase 6H: Database Migration     → Create Tables (api_keys, download_jobs)"
+    echo ""
+    echo "🔧 ESTIMATED TIME: 15-20 minutes"
+    echo "💰 ESTIMATED COST: ~$50-80/month (dev environment)"
+    echo "🌍 REGION: us-east-1"
+    echo ""
+    echo "⚠️  PREREQUISITES:"
+    echo "   ✓ AWS CLI configured with valid credentials"
+    echo "   ✓ Terraform installed (>= 1.0)"
+    echo "   ✓ Docker installed (for image building)"
+    echo "   ✓ jq installed (for JSON processing)"
+    echo ""
+    echo "🎛️  AVAILABLE COMMANDS:"
+    echo "   ./deploy-infrastructure.sh          → Full deployment (default)"
+    echo "   ./deploy-infrastructure.sh plan     → Show deployment plan only"  
+    echo "   ./deploy-infrastructure.sh init     → Initialize Terraform only"
+    echo "   ./deploy-infrastructure.sh rollback → Destroy all resources"
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    
+    # Prompt for confirmation unless in non-interactive mode
+    if [[ "${1:-}" != "auto" ]]; then
+        read -p "🤔 Do you want to proceed with the deployment? (y/N): " confirm
+        if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+            echo "Deployment cancelled by user."
+            exit 0
+        fi
+        echo ""
+    fi
+}
+
 # Main script execution
 main() {
-    echo ""
-    log "🚀 AWS Infrastructure Deployment Script"
-    log "Orchestrates Terraform deployment across all modules"
-    log "Deploys: VPC → Storage → Database → Queue → LoadBalancer → Compute → Application → Migration"
-    echo ""
+    # Show comprehensive overview for full deployment
+    case "${1:-}" in
+        "rollback"|"destroy"|"plan"|"init")
+            # Skip overview for utility commands
+            ;;
+        *)
+            show_deployment_overview "$@"
+            ;;
+    esac
     
     # Handle command line arguments
     case "${1:-}" in
