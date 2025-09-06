@@ -37,9 +37,10 @@
 - VPC Basic: ~$1-2/month
 
 ### Option 2: Optimal Development (~$59-60/month) **CURRENTLY DEPLOYED**
+
 **Target**: Proper development environment with managed services
 
-```
+```text
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   ECS Fargate   │    │   ECS Fargate   │    │                 │
 │  ┌───────────┐  │    │  ┌───────────┐  │    │  RDS PostgreSQL │

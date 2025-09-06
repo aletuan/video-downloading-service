@@ -35,7 +35,8 @@
 ## System Architecture
 
 ### Infrastructure Components
-```
+
+```text
 ┌─ Networking ─────────────────────────────────────────────┐
 │  VPC → Subnets → Internet Gateway → Security Groups     │
 │                                                          │
@@ -56,6 +57,7 @@
 ```
 
 ### Service Integration
+
 - **FastAPI Application**: Connects to RDS, Redis, S3, SQS
 - **Celery Workers**: Process background tasks from SQS
 - **Load Balancer**: Routes traffic to FastAPI containers
@@ -80,13 +82,16 @@
 **Total Estimated Cost**: $59.95-60.20/month
 
 ### Cost Optimization Features
+
 - **Development Focus**: Single-AZ deployments reduce costs
 - **Minimal Resources**: t3.micro instances for non-production workloads
 - **Free Tier Usage**: VPC, basic monitoring, and data transfer included
 - **Auto-scaling**: ECS can scale down to 0 for cost savings during idle periods
 
 ### Production Cost Considerations
+
 For production deployment, expect ~2-3x cost increase (~$140-180/month) due to:
+
 - Multi-AZ database deployment, larger instance sizes, SSL certificates, enhanced monitoring
 
 ---
@@ -94,6 +99,7 @@ For production deployment, expect ~2-3x cost increase (~$140-180/month) due to:
 ## Deployment Operations
 
 ### Automated Deployment Scripts
+
 - **`./scripts/deploy-infrastructure.sh`**: Complete infrastructure deployment
   - Handles all AWS resources automatically
   - Includes rollback functionality with `./scripts/deploy-infrastructure.sh rollback`
@@ -103,6 +109,7 @@ For production deployment, expect ~2-3x cost increase (~$140-180/month) due to:
   - Pushes to ECR and triggers ECS service redeployment
 
 ### Essential Terraform Commands
+
 ```bash
 # Navigate to Terraform directory
 cd infrastructure/terraform/environments/dev
@@ -134,7 +141,9 @@ terraform apply -target=module.compute
 ### Common Issues and Solutions
 
 #### Infrastructure Issues
+
 **Problem**: Terraform deployment fails with resource conflicts
+
 ```bash
 # Solution: Check existing resources
 terraform state list
@@ -142,13 +151,16 @@ terraform import <resource_type>.<resource_name> <resource_id>
 ```
 
 #### Application Issues
+
 **Problem**: Health checks failing
+
 ```bash
 # Test health endpoint directly
 curl http://<ALB-DNS-NAME>/health
 ```
 
 **Problem**: Database connection issues
+
 ```bash
 # Check Terraform outputs for connection details
 terraform output rds_endpoint
@@ -156,7 +168,9 @@ terraform output redis_endpoint
 ```
 
 #### Bootstrap Issues
+
 **Problem**: Cannot create initial admin API key
+
 ```bash
 # Check bootstrap status
 curl http://<ALB-DNS-NAME>/api/v1/bootstrap/status
@@ -167,6 +181,7 @@ curl http://<ALB-DNS-NAME>/api/v1/bootstrap/status
 ## Verified Functionality
 
 ### Core System Components **TESTED & WORKING**
+
 - **Infrastructure**: All AWS resources deployed and healthy
 - **Services**: FastAPI and Celery containers running in ECS
 - **Load Balancer**: ALB routing traffic with health checks passing
@@ -182,6 +197,7 @@ curl http://<ALB-DNS-NAME>/api/v1/bootstrap/status
 - **Job Status Tracking**: Real-time progress monitoring functional
 
 ### Test Results Summary
+
 1. ✅ **Video info extraction**: Working (ALB timeout expected for long processing)
 2. ✅ **Download job creation**: Working (fast async response)
 3. ✅ **Job status tracking**: Working (queued→processing→completed)
@@ -189,6 +205,7 @@ curl http://<ALB-DNS-NAME>/api/v1/bootstrap/status
 5. ✅ **Complete API test suite**: All 10 test cases documented in [API-TEST-SUITE.md](API-TEST-SUITE.md)
 
 ### Optional Enhancements
+
 - **WebSocket**: Real-time progress updates via WebSocket (HTTP polling currently works)
 - **File Serving**: Direct video/subtitle file delivery via signed URLs
 - **Advanced Features**: Playlist downloads, format selection UI
@@ -200,12 +217,14 @@ curl http://<ALB-DNS-NAME>/api/v1/bootstrap/status
 ## Documentation
 
 ### Project Documentation
+
 - **[AWS-INFRASTRUCTURE.md](AWS-INFRASTRUCTURE.md)**: Architecture planning, service configurations, and scaling strategies
 - **[API.md](API.md)**: Complete API documentation, authentication guide, and endpoint examples
 - **[API-TEST-SUITE.md](API-TEST-SUITE.md)**: Comprehensive test suite with all 10 test cases and expected outcomes
 - **[../CLAUDE.md](../CLAUDE.md)**: Development commands, architecture overview, and local testing procedures
 
 ### External Resources
+
 - [Terraform AWS Provider Documentation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
 - [ECS Fargate Documentation](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html)
 - [Application Load Balancer Guide](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/)
