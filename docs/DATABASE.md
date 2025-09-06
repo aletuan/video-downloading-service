@@ -7,12 +7,14 @@ The YouTube Video Download Service uses **PostgreSQL** as its primary database f
 ## Database Configuration
 
 ### Local Development
+
 - **Database**: PostgreSQL 15 (Docker container)
 - **Host**: localhost:5433 (non-standard port to avoid conflicts)
 - **Database Name**: `youtube_service`
 - **User**: `postgres`
 
 ### Production (AWS)
+
 - **Database**: Amazon RDS PostgreSQL
 - **Connection**: Via environment variables
 - **SSL**: Enabled with certificate validation
@@ -186,6 +188,7 @@ INSERT INTO download_jobs VALUES (
 ```
 
 **Key Statistics from Sample Data:**
+
 - **Processing Time**: 27 seconds (from start to completion)
 - **File Size**: 11.75 MB for 3:33 video at 720p quality
 - **Success Rate**: 100% (completed on first attempt, no retries needed)
@@ -232,6 +235,7 @@ INSERT INTO api_keys VALUES (
 ```
 
 **Usage Statistics from Sample Data:**
+
 - **Admin Key**: Used 5 times (system management operations)
 - **Download Key**: Used 1 time (for the video download above)
 - **Creation Pattern**: Bootstrap → Admin Key → Download Key (proper hierarchy)
@@ -251,6 +255,7 @@ downloads/
 ```
 
 **Sample Subtitle Content:**
+
 ```srt
 1
 00:00:01,360 --> 00:00:03,040
