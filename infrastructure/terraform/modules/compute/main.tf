@@ -186,7 +186,7 @@ resource "aws_ecs_task_definition" "app" {
       environment = [
         {
           name  = "ENVIRONMENT"
-          value = var.environment
+          value = "aws"
         },
         {
           name  = "DEBUG"
@@ -257,7 +257,7 @@ resource "aws_ecs_task_definition" "worker" {
       environment = [
         {
           name  = "ENVIRONMENT"
-          value = var.environment
+          value = "aws"
         },
         {
           name  = "DEBUG"
