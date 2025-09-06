@@ -2,7 +2,7 @@ import pytest
 import tempfile
 import shutil
 from pathlib import Path
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock, AsyncMock, Mock
 import asyncio
 from botocore.exceptions import ClientError, NoCredentialsError
 
@@ -375,3 +375,247 @@ class TestStorageHealthCheck:
         assert result["status"] == "unhealthy"
         assert result["storage_type"] == "unknown"
         assert "Storage initialization failed" in result["error"]
+
+
+class TestStorageErrorHandling:
+    """Test storage error handling edge cases."""
+    
+    @patch('builtins.open', side_effect=PermissionError("Permission denied"))
+    @patch('pathlib.Path.mkdir')
+    def test_local_storage_permission_denied(self, mock_mkdir, mock_open):
+        """Test local storage with permission denied errors."""
+        handler = LocalStorageHandler(base_path="/restricted/path")
+        
+        # Test save_file with permission denied
+        result = handler.save_file("test.txt", b"content")
+        assert result is False
+        
+    def test_local_storage_disk_full(self):
+        """Test local storage with disk full simulation."""
+        handler = LocalStorageHandler(base_path="/tmp/test")
+        
+        with patch('builtins.open', side_effect=OSError("No space left on device")):
+            result = handler.save_file("large_file.txt", b"content")
+            assert result is False
+    
+    @patch('pathlib.Path.exists', return_value=False)
+    @patch('pathlib.Path.mkdir', side_effect=FileNotFoundError("Directory not found"))
+    def test_local_storage_invalid_base_path(self, mock_mkdir, mock_exists):
+        """Test local storage with invalid base path."""
+        handler = LocalStorageHandler(base_path="/nonexistent/deeply/nested/path")
+        
+        result = handler.save_file("test.txt", b"content")
+        assert result is False
+    
+    @patch('aiofiles.open', side_effect=FileNotFoundError("File not found"))
+    def test_local_storage_file_not_found(self, mock_open):
+        """Test local storage file operations with missing files."""
+        handler = LocalStorageHandler()
+        
+        # Test get_file with non-existent file
+        result = handler.get_file("nonexistent.txt")
+        assert result is None
+    
+    def test_local_storage_concurrent_access_conflict(self):
+        """Test local storage with concurrent access conflicts."""
+        handler = LocalStorageHandler()
+        
+        # Simulate file being locked by another process
+        with patch('builtins.open', side_effect=OSError("Resource temporarily unavailable")):
+            result = handler.save_file("locked_file.txt", b"content")
+            assert result is False
+    
+    def test_local_storage_filename_edge_cases(self):
+        """Test local storage with problematic filenames."""
+        handler = LocalStorageHandler()
+        
+        problematic_names = [
+            "../../../etc/passwd",  # Path traversal
+            "con.txt",  # Windows reserved name
+            "file?.txt",  # Invalid character
+            "very_long_filename_" + "x" * 300,  # Extremely long filename
+            "",  # Empty filename
+            "file\x00.txt",  # Null character
+        ]
+        
+        for filename in problematic_names:
+            # These should either be handled gracefully or raise appropriate exceptions
+            try:
+                result = handler.save_file(filename, b"content")
+                # If it succeeds, verify it's handled safely
+                if result:
+                    # Should not allow path traversal
+                    assert "../" not in filename or not result
+            except (ValueError, OSError):
+                # Expected for invalid filenames
+                pass
+    
+    def test_s3_storage_network_timeout(self):
+        """Test S3 storage with network timeout errors."""
+        from unittest.mock import Mock
+        from botocore.exceptions import ConnectTimeoutError, ReadTimeoutError
+        
+        mock_s3_client = Mock()
+        mock_s3_client.put_object.side_effect = ConnectTimeoutError(
+            endpoint_url="https://s3.amazonaws.com"
+        )
+        
+        handler = S3StorageHandler(bucket_name="test-bucket")
+        handler.s3_client = mock_s3_client
+        
+        result = handler.save_file("test.txt", b"content")
+        assert result is False
+    
+    def test_s3_storage_credentials_error(self):
+        """Test S3 storage with credential errors."""
+        from botocore.exceptions import NoCredentialsError, ClientError
+        
+        mock_s3_client = Mock()
+        mock_s3_client.put_object.side_effect = NoCredentialsError()
+        
+        handler = S3StorageHandler(bucket_name="test-bucket")
+        handler.s3_client = mock_s3_client
+        
+        result = handler.save_file("test.txt", b"content")
+        assert result is False
+        
+        # Test expired credentials
+        mock_s3_client.put_object.side_effect = ClientError(
+            error_response={"Error": {"Code": "ExpiredToken"}},
+            operation_name="PutObject"
+        )
+        
+        result = handler.save_file("test2.txt", b"content")
+        assert result is False
+    
+    def test_s3_storage_bucket_not_found(self):
+        """Test S3 storage with non-existent bucket."""
+        from botocore.exceptions import ClientError
+        
+        mock_s3_client = Mock()
+        mock_s3_client.put_object.side_effect = ClientError(
+            error_response={"Error": {"Code": "NoSuchBucket"}},
+            operation_name="PutObject"
+        )
+        
+        handler = S3StorageHandler(bucket_name="nonexistent-bucket")
+        handler.s3_client = mock_s3_client
+        
+        result = handler.save_file("test.txt", b"content")
+        assert result is False
+    
+    def test_s3_storage_access_denied(self):
+        """Test S3 storage with access denied errors."""
+        from botocore.exceptions import ClientError
+        
+        mock_s3_client = Mock()
+        mock_s3_client.put_object.side_effect = ClientError(
+            error_response={"Error": {"Code": "AccessDenied"}},
+            operation_name="PutObject"
+        )
+        
+        handler = S3StorageHandler(bucket_name="restricted-bucket")
+        handler.s3_client = mock_s3_client
+        
+        result = handler.save_file("test.txt", b"content")
+        assert result is False
+    
+    def test_s3_storage_quota_exceeded(self):
+        """Test S3 storage with quota/billing errors."""
+        from botocore.exceptions import ClientError
+        
+        mock_s3_client = Mock()
+        mock_s3_client.put_object.side_effect = ClientError(
+            error_response={"Error": {"Code": "ServiceUnavailable", "Message": "Reduce your request rate"}},
+            operation_name="PutObject"
+        )
+        
+        handler = S3StorageHandler(bucket_name="quota-exceeded-bucket")
+        handler.s3_client = mock_s3_client
+        
+        result = handler.save_file("test.txt", b"content")
+        assert result is False
+    
+    @patch('app.core.storage.settings')
+    def test_storage_factory_missing_configuration(self, mock_settings):
+        """Test storage factory with missing configuration."""
+        # Missing S3 bucket name
+        mock_settings.environment = "aws"
+        mock_settings.s3_bucket_name = None
+        
+        with pytest.raises(ValueError, match="S3 bucket name not configured"):
+            get_storage_handler()
+        
+        # Missing local storage path
+        mock_settings.environment = "localhost"
+        mock_settings.download_base_path = None
+        
+        # Should handle gracefully or raise appropriate error
+        try:
+            handler = get_storage_handler()
+            # If successful, should use reasonable default
+            assert handler is not None
+        except ValueError:
+            # Expected if no default path available
+            pass
+    
+    def test_storage_factory_unknown_environment(self):
+        """Test storage factory with unknown environment."""
+        with patch('app.core.storage.settings') as mock_settings:
+            mock_settings.environment = "unknown_env"
+            
+            # Should fallback to localhost
+            handler = get_storage_handler()
+            assert isinstance(handler, LocalStorageHandler)
+    
+    @patch('app.core.storage.init_storage')
+    async def test_storage_health_check_recovery(self, mock_init):
+        """Test storage health check recovery after failure."""
+        # First call fails, second succeeds
+        mock_handler = Mock()
+        mock_handler.save_file.side_effect = [False, True]  # Fail then succeed
+        mock_handler.delete_file.return_value = True
+        mock_init.return_value = mock_handler
+        
+        # First check should fail
+        result1 = await health_check_storage()
+        assert result1["status"] == "unhealthy"
+        
+        # Second check should succeed (simulating recovery)
+        result2 = await health_check_storage()
+        assert result2["status"] == "healthy"
+    
+    def test_storage_large_file_handling(self):
+        """Test storage handling of very large files."""
+        handler = LocalStorageHandler()
+        
+        # Simulate very large file (mock to avoid actually creating large files)
+        large_content = b"x" * (100 * 1024 * 1024)  # 100MB
+        
+        with patch('builtins.open', side_effect=MemoryError("Cannot allocate memory")):
+            result = handler.save_file("large_file.bin", large_content)
+            assert result is False
+    
+    def test_storage_special_characters_in_paths(self):
+        """Test storage with special characters and unicode in paths."""
+        handler = LocalStorageHandler()
+        
+        special_filenames = [
+            "file with spaces.txt",
+            "файл-с-русскими-буквами.txt",  # Cyrillic
+            "文件名.txt",  # Chinese
+            "file@#$%^&*().txt",  # Special characters
+            "file'\"\\test.txt",  # Quotes and backslash
+        ]
+        
+        for filename in special_filenames:
+            # Should handle gracefully without crashing
+            try:
+                result = handler.save_file(filename, b"test content")
+                # If successful, file should be accessible
+                if result:
+                    exists = handler.file_exists(filename)
+                    assert isinstance(exists, bool)
+            except (UnicodeError, OSError):
+                # Expected for some problematic characters
+                pass

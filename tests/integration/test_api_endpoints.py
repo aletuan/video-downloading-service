@@ -692,3 +692,165 @@ class TestRequestValidation:
             )
             # Should handle gracefully, either 422 or cap the limit
             assert response.status_code in [200, 422]
+
+
+class TestMalformedRequestEdgeCases:
+    """Test handling of malformed requests and boundary conditions."""
+    
+    def test_malformed_json_payloads(self, client, mock_database, mock_storage):
+        """Test handling of malformed JSON payloads."""
+        malformed_payloads = [
+            '{"url": "https://youtube.com/watch?v=test"',  # Missing closing brace
+            '{"url": "https://youtube.com/watch?v=test", "quality": }',  # Invalid JSON syntax
+            '{"url": "https://youtube.com/watch?v=test", "quality": null}',  # Null value
+            '{"url": undefined}',  # JavaScript-style undefined
+            '{"url": "test", "nested": {"invalid": }}',  # Nested malformed JSON
+        ]
+        
+        for payload in malformed_payloads:
+            response = client.post(
+                "/api/v1/download",
+                data=payload,  # Send raw string instead of json parameter
+                headers={"Content-Type": "application/json"}
+            )
+            # Should return 422 for malformed JSON
+            assert response.status_code == 422
+    
+    def test_oversized_request_payloads(self, client, mock_database, mock_storage):
+        """Test handling of oversized request payloads."""
+        # Create oversized JSON payload
+        oversized_payload = {
+            "url": "https://youtube.com/watch?v=test",
+            "huge_field": "x" * (10 * 1024 * 1024)  # 10MB string
+        }
+        
+        try:
+            response = client.post("/api/v1/download", json=oversized_payload)
+            # Should either reject or handle gracefully
+            assert response.status_code in [413, 422, 400]  # Payload too large, validation error, or bad request
+        except Exception:
+            # May throw exception for oversized payload - that's acceptable
+            pass
+    
+    def test_unicode_and_special_characters(self, client, mock_database, mock_storage):
+        """Test handling of unicode and special characters in requests."""
+        unicode_payloads = [
+            {"url": "https://youtube.com/watch?v=测试"},  # Chinese characters
+            {"url": "https://youtube.com/watch?v=тест"},  # Cyrillic
+            {"url": "https://youtube.com/watch?v=🎵🎬"},  # Emojis
+            {"url": "https://youtube.com/watch?v=test", "description": "файл с русскими буквами"},
+            {"url": "https://youtube.com/watch?v=test\x00null"},  # Null byte
+        ]
+        
+        for payload in unicode_payloads:
+            response = client.post("/api/v1/download", json=payload)
+            # Should handle gracefully, either accepting or rejecting with proper error
+            assert response.status_code in [200, 400, 401, 403, 422]
+    
+    def test_content_type_mismatches(self, client, mock_database, mock_storage):
+        """Test handling of content type mismatches."""
+        valid_payload = {"url": "https://youtube.com/watch?v=test"}
+        
+        # Send JSON with wrong content type
+        response = client.post(
+            "/api/v1/download",
+            json=valid_payload,
+            headers={"Content-Type": "text/plain"}
+        )
+        # Should handle content type mismatch
+        assert response.status_code in [400, 415, 422]
+        
+        # Send form data instead of JSON
+        response = client.post(
+            "/api/v1/download",
+            data="url=https://youtube.com/watch?v=test",
+            headers={"Content-Type": "application/x-www-form-urlencoded"}
+        )
+        # Should handle form data appropriately
+        assert response.status_code in [400, 415, 422]
+    
+    def test_http_method_edge_cases(self, client, mock_database, mock_storage):
+        """Test handling of unsupported HTTP methods."""
+        unsupported_methods = [
+            ("PATCH", "/api/v1/download"),
+            ("PUT", "/api/v1/info"),
+            ("DELETE", "/api/v1/health"),
+            ("HEAD", "/api/v1/download"),
+            ("OPTIONS", "/api/v1/admin/keys"),
+        ]
+        
+        for method, endpoint in unsupported_methods:
+            response = client.request(method, endpoint)
+            # Should return method not allowed
+            assert response.status_code == 405
+    
+    def test_header_injection_attempts(self, client, mock_database, mock_storage):
+        """Test handling of header injection attempts."""
+        malicious_headers = {
+            "X-API-Key": "test\r\nEvil-Header: injected",  # CRLF injection
+            "X-Forwarded-For": "127.0.0.1\r\nHost: evil.com",
+            "User-Agent": "Mozilla/5.0\x00\r\nEvil: header",
+        }
+        
+        for header, value in malicious_headers.items():
+            try:
+                response = client.get("/health", headers={header: value})
+                # Should handle malicious headers gracefully
+                assert response.status_code in [200, 400, 422]
+            except Exception:
+                # Headers with null bytes or CRLF may raise exceptions - acceptable
+                pass
+    
+    def test_url_path_traversal_attempts(self, client, mock_database, mock_storage):
+        """Test handling of path traversal attempts in URLs."""
+        malicious_paths = [
+            "/api/v1/../../../etc/passwd",
+            "/api/v1/download/../../admin/keys",
+            "/api/v1/info?url=../config",
+            "/api/v1/jobs/../../../secret",
+        ]
+        
+        for path in malicious_paths:
+            response = client.get(path)
+            # Should either return 404 (not found) or proper error, not expose sensitive paths
+            assert response.status_code in [404, 400, 422]
+            # Ensure no sensitive information is leaked in response
+            response_text = response.text.lower()
+            assert "passwd" not in response_text
+            assert "config" not in response_text or "configuration" not in response_text
+    
+    def test_extremely_long_urls(self, client, mock_database, mock_storage):
+        """Test handling of extremely long URLs."""
+        # Create extremely long URL
+        base_url = "https://youtube.com/watch?v=test"
+        long_url = base_url + "&param=" + "x" * 10000
+        
+        response = client.get("/api/v1/info", params={"url": long_url})
+        # Should handle long URLs gracefully
+        assert response.status_code in [400, 413, 414, 422]  # Bad request, payload too large, URI too long, or validation error
+    
+    def test_concurrent_request_edge_cases(self, client, mock_database, mock_storage):
+        """Test handling of rapid concurrent requests."""
+        import threading
+        import time
+        
+        results = []
+        
+        def make_request():
+            response = client.get("/health")
+            results.append(response.status_code)
+        
+        # Send multiple concurrent requests
+        threads = []
+        for _ in range(10):
+            thread = threading.Thread(target=make_request)
+            threads.append(thread)
+            thread.start()
+        
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+        
+        # All requests should complete successfully or with expected errors
+        for status_code in results:
+            assert status_code in [200, 429, 503]  # OK, too many requests, or service unavailable

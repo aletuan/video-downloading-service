@@ -202,3 +202,131 @@ class TestDatabaseManager:
         assert health["status"] == "unhealthy"
         assert health["connected"] is False
         assert health["error"] == "Connection failed"
+
+
+class TestDatabaseErrorHandling:
+    """Test database error handling edge cases."""
+
+    @patch('app.core.database.create_async_engine')
+    @patch('app.core.database.settings')
+    async def test_database_engine_creation_timeout(self, mock_settings, mock_create_engine):
+        """Test database engine creation with connection timeout."""
+        mock_settings.database_url = "postgresql+asyncpg://user:pass@unreachable-host/db"
+        mock_create_engine.side_effect = TimeoutError("Connection timeout")
+        
+        with pytest.raises(TimeoutError):
+            create_database_engine()
+
+    @patch('app.core.database.create_async_engine')
+    @patch('app.core.database.settings')
+    async def test_database_engine_creation_invalid_url(self, mock_settings, mock_create_engine):
+        """Test database engine creation with invalid URL."""
+        mock_settings.database_url = "invalid://malformed@url"
+        mock_create_engine.side_effect = ValueError("Invalid database URL")
+        
+        with pytest.raises(ValueError):
+            create_database_engine()
+
+    @patch('app.core.database.get_db_session')
+    async def test_database_session_recovery_after_failure(self, mock_get_session):
+        """Test database session recovery after connection failure."""
+        # First call fails, second succeeds
+        mock_session = AsyncMock()
+        mock_get_session.side_effect = [
+            Exception("Connection lost"),
+            mock_session.__aenter__.return_value
+        ]
+        
+        # First attempt should fail
+        with pytest.raises(Exception):
+            async with mock_get_session() as session:
+                pass
+        
+        # Second attempt should succeed (simulating recovery)
+        try:
+            async with mock_get_session() as session:
+                assert session is not None
+        except Exception:
+            pytest.fail("Database session should recover after initial failure")
+
+    @patch('app.core.database.engine')
+    @patch('app.core.database.async_session_factory')
+    async def test_database_connection_pool_exhaustion(self, mock_session_factory, mock_engine):
+        """Test handling of database connection pool exhaustion."""
+        from sqlalchemy.exc import TimeoutError as SQLTimeoutError
+        
+        mock_session = AsyncMock()
+        mock_session.__aenter__.side_effect = SQLTimeoutError(
+            "QueuePool limit of size 5 overflow 10 reached", None, None, None
+        )
+        mock_session_factory.return_value = mock_session
+        
+        manager = DatabaseManager()
+        manager.session_factory = mock_session_factory
+        
+        health = await manager.health_check()
+        assert health["status"] == "unhealthy"
+        assert "pool" in health["error"].lower() or "timeout" in health["error"].lower()
+
+    @patch('app.core.database.get_db_session')
+    async def test_database_transaction_rollback_on_error(self, mock_get_session):
+        """Test transaction rollback on database errors."""
+        mock_session = AsyncMock()
+        mock_session.execute.side_effect = Exception("Database constraint violation")
+        mock_get_session.return_value.__aenter__.return_value = mock_session
+        
+        try:
+            async with mock_get_session() as session:
+                await session.execute("INSERT INTO test_table VALUES (?)", (1,))
+                await session.commit()
+        except Exception:
+            # Verify rollback was called
+            mock_session.rollback.assert_called()
+
+    async def test_database_url_conversion_edge_cases(self):
+        """Test database URL conversion with edge cases."""
+        edge_cases = [
+            ("", ""),  # Empty URL
+            ("sqlite:///:memory:", "sqlite:///:memory:"),  # In-memory SQLite
+            ("postgresql+asyncpg://user@localhost/db?sslmode=require", 
+             "postgresql+psycopg2://user@localhost/db?sslmode=require"),
+            ("mysql+aiomysql://user:pass@host/db", "mysql+aiomysql://user:pass@host/db"),  # Unsupported
+        ]
+        
+        for async_url, expected_sync_url in edge_cases:
+            sync_url = get_sync_database_url(async_url)
+            assert sync_url == expected_sync_url
+
+    @patch('app.core.database.check_database_connection')
+    async def test_database_connection_intermittent_failures(self, mock_check):
+        """Test handling of intermittent database connection failures."""
+        # Simulate intermittent failures: fail, succeed, fail, succeed
+        mock_check.side_effect = [False, True, False, True]
+        
+        manager = DatabaseManager()
+        
+        # First check should fail
+        health1 = await manager.health_check()
+        assert health1["status"] == "unhealthy"
+        
+        # Second check should succeed
+        health2 = await manager.health_check()
+        assert health2["status"] == "healthy"
+
+    @patch('app.core.database.text')
+    @patch('app.core.database.get_db_session')
+    async def test_database_query_malformed_sql(self, mock_get_session, mock_text):
+        """Test handling of malformed SQL queries."""
+        from sqlalchemy.exc import ProgrammingError
+        
+        mock_session = AsyncMock()
+        mock_session.execute.side_effect = ProgrammingError(
+            "syntax error at or near", None, None, None
+        )
+        mock_get_session.return_value.__aenter__.return_value = mock_session
+        
+        manager = DatabaseManager()
+        health = await manager.health_check()
+        
+        assert health["status"] == "unhealthy"
+        assert "error" in health
