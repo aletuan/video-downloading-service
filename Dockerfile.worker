@@ -32,4 +32,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 # EXPOSE 8000
 
 # Run Celery worker
-CMD ["celery", "-A", "app.tasks.celery_app", "worker", "--loglevel=info"]
+CMD ["celery", "-A", "app.tasks.download_tasks", "worker", "--loglevel=info"]
