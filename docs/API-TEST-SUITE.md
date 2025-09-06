@@ -70,7 +70,7 @@ curl "http://${ALB_DNS}/health/detailed" -s | jq .
 }
 ```
 
-**⚠️ Key Validation Points:**
+**Key Validation Points:**
 - `environment` must be `"aws"` (not "dev")
 - `storage_type` must be `"S3StorageHandler"` (not "LocalStorageHandler")  
 - `bucket_name` must not be `null`
@@ -127,7 +127,7 @@ curl -X POST "http://${ALB_DNS}/api/v1/bootstrap/admin-key" \
 }
 ```
 
-**⚠️ Important:** Save the `api_key` value for subsequent tests!
+**Important:** Save the `api_key` value for subsequent tests!
 
 ### Test 4b: Verify Bootstrap Disabled
 **Purpose:** Confirm bootstrap endpoint is properly secured  
@@ -238,7 +238,7 @@ curl -X POST "http://${ALB_DNS}/api/v1/admin/api-keys" \
 }
 ```
 
-**⚠️ Important:** Save the `api_key` value for download tests!
+**Important:** Save the `api_key` value for download tests!
 
 ---
 
@@ -311,7 +311,7 @@ curl "http://${ALB_DNS}/api/v1/status/${JOB_ID}" \
 }
 ```
 
-**⚠️ Permission Note:** Download key lacks READ_ONLY permission for status checking. Use admin key.
+**Permission Note:** Download key lacks READ_ONLY permission for status checking. Use admin key.
 
 ### Test 10: Verify S3 Storage
 **Purpose:** Confirm files are stored in S3 bucket  
@@ -422,7 +422,7 @@ set -e
 ALB_DNS="${ALB_DNS:-youtube-do-dev-alb-ff494fc6-1992147449.us-east-1.elb.amazonaws.com}"
 S3_BUCKET="${S3_BUCKET:-youtube-downloader-dev-videos-dc6abb7746a3ee7b}"
 
-echo "🚀 Starting YouTube Downloader API Test Suite"
+echo "Starting YouTube Downloader API Test Suite"
 echo "ALB DNS: $ALB_DNS"
 
 # Test 1: Health Check
@@ -435,7 +435,7 @@ curl -s "http://$ALB_DNS/api/v1/bootstrap/status" | jq -r '.status // "FAILED"'
 
 # Add more automated tests as needed...
 
-echo "✅ Test Suite Complete"
+echo "Test Suite Complete"
 ```
 
 ---
