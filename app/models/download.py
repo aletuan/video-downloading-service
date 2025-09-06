@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Literal
-from pydantic import BaseModel, Field, HttpUrl, validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 from enum import Enum
 import uuid
 
@@ -70,7 +70,8 @@ class DownloadRequest(BaseModel, SecurityValidationMixin):
         example=["en", "es", "fr"]
     )
     
-    @validator('url')
+    @field_validator('url')
+    @classmethod
     def validate_youtube_url(cls, v):
         """Validate YouTube URL using comprehensive validator."""
         url_str = str(v)
@@ -80,7 +81,8 @@ class DownloadRequest(BaseModel, SecurityValidationMixin):
         except ValueError as e:
             raise ValueError(f'Invalid YouTube URL: {e}')
     
-    @validator('subtitle_languages')
+    @field_validator('subtitle_languages')
+    @classmethod
     def validate_subtitle_languages(cls, v):
         """Validate subtitle language codes."""
         if not v:

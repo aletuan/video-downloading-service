@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func, update as sqlalchemy_update, delete
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.validation import InputValidator
 
@@ -39,14 +39,16 @@ class APIKeyCreateRequest(BaseModel):
     """Request model for creating a new API key."""
     name: str = Field(..., min_length=1, max_length=100, description="Human-readable name for the API key")
     
-    @validator('name')
+    @field_validator('name')
+    @classmethod
     def validate_name(cls, v):
         """Validate API key name using security validator."""
         return InputValidator.validate_api_key_name(v)
     permission_level: APIKeyPermission = Field(default=APIKeyPermission.READ_ONLY, description="Permission level")
     description: Optional[str] = Field(None, max_length=500, description="Optional description")
     
-    @validator('description')
+    @field_validator('description')
+    @classmethod
     def validate_description(cls, v):
         """Validate description using security validator."""
         if v is None:
@@ -56,7 +58,8 @@ class APIKeyCreateRequest(BaseModel):
     custom_rate_limit: Optional[int] = Field(None, ge=1, le=10000, description="Custom rate limit per minute")
     notes: Optional[str] = Field(None, max_length=1000, description="Additional notes")
     
-    @validator('notes')
+    @field_validator('notes')
+    @classmethod
     def validate_notes(cls, v):
         """Validate notes using security validator."""
         if v is None:
@@ -108,21 +111,24 @@ class APIKeyUpdateRequest(BaseModel):
     custom_rate_limit: Optional[int] = Field(None, ge=1, le=10000)
     notes: Optional[str] = Field(None, max_length=1000)
     
-    @validator('name')
+    @field_validator('name')
+    @classmethod
     def validate_name(cls, v):
         """Validate API key name using security validator."""
         if v is None:
             return v
         return InputValidator.validate_api_key_name(v)
     
-    @validator('description')
+    @field_validator('description')
+    @classmethod
     def validate_description(cls, v):
         """Validate description using security validator."""
         if v is None:
             return v
         return InputValidator.validate_description(v, max_length=500)
     
-    @validator('notes')
+    @field_validator('notes')
+    @classmethod
     def validate_notes(cls, v):
         """Validate notes using security validator."""
         if v is None:

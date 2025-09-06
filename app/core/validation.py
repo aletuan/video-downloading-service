@@ -11,7 +11,7 @@ import bleach
 from typing import Optional, List, Dict, Any, Union
 from urllib.parse import urlparse, parse_qs
 import validators
-from pydantic import validator
+from pydantic import field_validator, model_validator
 import logging
 
 logger = logging.getLogger(__name__)
@@ -389,18 +389,21 @@ class SecurityValidationMixin:
     Mixin class to add security validation to Pydantic models.
     """
     
-    @validator('*', pre=True)
-    def validate_strings(cls, v):
+    @model_validator(mode='before')
+    @classmethod
+    def validate_strings(cls, values):
         """Pre-validator to check all string fields for security issues."""
-        if isinstance(v, str):
-            # Check for SQL injection patterns
-            if InputValidator.check_sql_injection(v):
-                raise ValueError("Input contains potentially dangerous patterns")
-            
-            # Basic sanitization
-            v = InputValidator.sanitize_string(v, strip_dangerous=True)
+        if isinstance(values, dict):
+            for key, value in values.items():
+                if isinstance(value, str):
+                    # Check for SQL injection patterns
+                    if InputValidator.check_sql_injection(value):
+                        raise ValueError(f"Field '{key}' contains potentially dangerous patterns")
+                    
+                    # Basic sanitization
+                    values[key] = InputValidator.sanitize_string(value, strip_dangerous=True)
         
-        return v
+        return values
 
 
 # Custom Pydantic field types with built-in validation
