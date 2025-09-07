@@ -20,7 +20,7 @@ storage_cloudfront_price_class     = "PriceClass_100"
 storage_cors_allowed_origins       = ["*"]
 
 # Database Configuration (Development Optimized)
-postgres_version                   = "15.8"
+postgres_version                   = "15.12"
 postgres_instance_class           = "db.t3.micro"      # ~$12/month
 postgres_allocated_storage        = 20                 # Minimum for gp2
 postgres_max_allocated_storage    = 100
