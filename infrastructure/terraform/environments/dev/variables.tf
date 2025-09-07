@@ -79,7 +79,7 @@ variable "storage_cors_allowed_origins" {
 variable "postgres_version" {
   description = "PostgreSQL version"
   type        = string
-  default     = "15.4"
+  default     = "15.12"
 }
 
 variable "postgres_instance_class" {
