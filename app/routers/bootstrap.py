@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Depends, Header
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.config import Settings, get_settings
 from app.core.database import get_db
@@ -41,12 +41,14 @@ class BootstrapAdminKeyRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="Human-readable name for the admin API key")
     description: Optional[str] = Field(None, max_length=500, description="Optional description for the admin key")
     
-    @validator('name')
+    @field_validator('name')
+    @classmethod
     def validate_name(cls, v):
         """Validate API key name using security validator."""
         return InputValidator.validate_api_key_name(v)
     
-    @validator('description')
+    @field_validator('description')
+    @classmethod
     def validate_description(cls, v):
         """Validate description if provided."""
         if v is not None:
