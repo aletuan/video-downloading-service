@@ -181,7 +181,7 @@ output "next_steps" {
   value = {
     "1_build_images" = "Build and push Docker images to ECR"
     "2_update_task_definitions" = "Update ECS task definitions with real image URIs"
-    "3_run_migrations" = "Run database migrations"
+    "3_deploy_and_migrate" = "Run ./scripts/deploy-infrastructure.sh (handles migration automatically)"
     "4_test_deployment" = "Test the deployed services"
     "5_cleanup" = "Run 'terraform destroy' to clean up resources"
   }
