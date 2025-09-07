@@ -116,6 +116,83 @@ async def detailed_health_check():
         }
 
 
+@app.get("/health/migration")
+async def migration_status_check():
+    """Check migration status and bootstrap readiness."""
+    try:
+        from sqlalchemy import text
+        from datetime import datetime
+        import traceback
+        
+        # Check if api_keys table exists and bootstrap is ready
+        migration_checks = {
+            "api_keys_table_exists": False,
+            "bootstrap_ready": False,
+            "alembic_version": None,
+            "admin_keys_count": 0
+        }
+        
+        try:
+            async with db_manager.get_session() as session:
+                # Check if api_keys table exists
+                result = await session.execute(text(
+                    "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'api_keys'"
+                ))
+                table_exists = result.scalar() > 0
+                migration_checks["api_keys_table_exists"] = table_exists
+                
+                if table_exists:
+                    # Check admin keys count
+                    from app.models.database import APIKey
+                    from sqlalchemy import select, func
+                    result = await session.execute(
+                        select(func.count(APIKey.id)).where(
+                            APIKey.permission_level.in_(["admin", "full_access"]),
+                            APIKey.is_active == True
+                        )
+                    )
+                    migration_checks["admin_keys_count"] = result.scalar()
+                    migration_checks["bootstrap_ready"] = True
+                
+                # Check alembic version
+                try:
+                    result = await session.execute(text("SELECT version_num FROM alembic_version LIMIT 1"))
+                    version = result.scalar()
+                    migration_checks["alembic_version"] = version
+                except Exception:
+                    migration_checks["alembic_version"] = "no_version_table"
+                    
+        except Exception as e:
+            migration_checks["error"] = str(e)
+            logger.error(f"Migration check failed: {e}")
+        
+        # Determine overall migration status
+        migration_status = "complete" if migration_checks["api_keys_table_exists"] and migration_checks["bootstrap_ready"] else "incomplete"
+        if "error" in migration_checks:
+            migration_status = "error"
+        
+        return {
+            "migration_status": migration_status,
+            "environment": settings.environment,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "checks": migration_checks,
+            "recommendations": [
+                "Run ./scripts/migrate-database-simple.sh" if migration_status == "incomplete" else None,
+                "Check alembic/versions/ for migration files" if not migration_checks.get("alembic_version") else None,
+                "Create admin key via bootstrap endpoint" if migration_checks["admin_keys_count"] == 0 else None
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"Migration status check failed: {e}")
+        return {
+            "migration_status": "error",
+            "environment": settings.environment,
+            "error": str(e),
+            "traceback": traceback.format_exc() if settings.debug else None
+        }
+
+
 # Static file serving for local storage
 if settings.environment == "localhost":
     downloads_path = Path(settings.download_base_path).resolve()

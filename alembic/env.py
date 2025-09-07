@@ -1,5 +1,6 @@
 import sys
 import os
+import urllib.parse
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
@@ -32,7 +33,25 @@ elif "postgresql+asyncpg" in database_url:
 if "ssl=require" in database_url:
     database_url = database_url.replace("ssl=require", "sslmode=require")
 
-config.set_main_option("sqlalchemy.url", database_url)
+# Handle special characters in database URL for ConfigParser
+# Parse the URL to properly encode the password component
+try:
+    parsed = urllib.parse.urlparse(database_url)
+    if parsed.password and any(char in parsed.password for char in ['%', '(', ')', ',', '>', '<', '#']):
+        # Reconstruct URL with URL-encoded password
+        encoded_password = urllib.parse.quote(parsed.password, safe='')
+        database_url = f"{parsed.scheme}://{parsed.username}:{encoded_password}@{parsed.hostname}:{parsed.port}{parsed.path}"
+        if parsed.query:
+            database_url += f"?{parsed.query}"
+except Exception as e:
+    # If URL parsing fails, try to set it directly via environment approach
+    print(f"Warning: URL parsing failed: {e}, using direct approach")
+    # Store URL in environment for engine_from_config to pick up
+    os.environ['SQLALCHEMY_URL'] = database_url
+    database_url = ""  # Clear for config.set_main_option
+
+if database_url:  # Only set if we have a processed URL
+    config.set_main_option("sqlalchemy.url", database_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -80,8 +99,14 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    configuration = config.get_section(config.config_ini_section, {})
+    
+    # If no URL was set via config (due to encoding issues), use environment variable
+    if 'sqlalchemy.url' not in configuration or not configuration.get('sqlalchemy.url'):
+        configuration['sqlalchemy.url'] = os.environ.get('SQLALCHEMY_URL', database_url)
+    
     connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
+        configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )

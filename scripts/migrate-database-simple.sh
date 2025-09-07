@@ -45,6 +45,34 @@ get_alb_endpoint() {
     fi
 }
 
+# Get network configuration from terraform
+get_network_configuration() {
+    if [ -f "$TERRAFORM_DIR/terraform.tfstate" ]; then
+        cd "$TERRAFORM_DIR"
+        
+        # Get subnet IDs
+        local subnets=$(terraform output -json public_subnet_ids 2>/dev/null | jq -r '.[]' | tr '\n' ',' | sed 's/,$//')
+        if [[ -z "$subnets" ]]; then
+            error "Could not get subnet IDs from terraform outputs"
+            return 1
+        fi
+        
+        # Get ECS security group ID
+        local security_group=$(terraform output -json security_groups 2>/dev/null | jq -r '.ecs')
+        if [[ -z "$security_group" || "$security_group" == "null" ]]; then
+            error "Could not get ECS security group ID from terraform outputs"
+            return 1
+        fi
+        
+        # Format as awsvpcConfiguration
+        echo "awsvpcConfiguration={subnets=[$subnets],securityGroups=[$security_group],assignPublicIp=ENABLED}"
+        return 0
+    else
+        error "Terraform state file not found at $TERRAFORM_DIR/terraform.tfstate"
+        return 1
+    fi
+}
+
 # Test database using application health check
 test_database_via_health_check() {
     log "🔍 Testing database connectivity via application health check..."
@@ -119,8 +147,15 @@ run_alembic_migration() {
     fi
     
     if [[ -z "$cluster_name" ]]; then
-        warning "Could not get ECS cluster name from terraform - skipping Alembic migration"
-        return 1
+        # Try to find cluster name from running services
+        cluster_name=$(aws ecs list-clusters --query 'clusterArns[?contains(@, `youtube-downloader-dev`)]' --output text | head -1)
+        if [[ -n "$cluster_name" ]]; then
+            cluster_name=$(basename "$cluster_name")
+            log "Found ECS cluster from AWS: $cluster_name"
+        else
+            warning "Could not get ECS cluster name from terraform or AWS - skipping Alembic migration"
+            return 1
+        fi
     fi
     
     log "Using ECS cluster: $cluster_name"
@@ -133,12 +168,25 @@ run_alembic_migration() {
         return 0
     fi
     
+    # Get network configuration from terraform
+    local network_config=$(get_network_configuration)
+    if [[ $? -ne 0 ]]; then
+        warning "Could not get network configuration from terraform - skipping Alembic migration"
+        return 1
+    fi
+    
+    log "Using network configuration: $network_config"
+    
+    # Get the latest task definition
+    local task_def=$(aws ecs list-task-definitions --family-prefix youtube-downloader-dev-app --query 'taskDefinitionArns[-1]' --output text)
+    log "Using task definition: $task_def"
+    
     # Run Alembic upgrade
     local task_arn=$(aws ecs run-task \
         --cluster "$cluster_name" \
-        --task-definition "youtube-downloader-dev-app" \
+        --task-definition "$task_def" \
         --launch-type FARGATE \
-        --network-configuration "awsvpcConfiguration={subnets=[subnet-091fbb053364099db,subnet-06e58aa38a966b2bb],securityGroups=[sg-0a6949d40ea093478],assignPublicIp=ENABLED}" \
+        --network-configuration "$network_config" \
         --overrides '{"containerOverrides":[{"name":"fastapi-app","command":["alembic","upgrade","head"]}]}' \
         --query 'tasks[0].taskArn' \
         --output text 2>/dev/null || echo "FAILED")
@@ -202,6 +250,30 @@ verify_tables_via_application() {
     fi
 }
 
+# Check if bootstrap endpoint works (indicating api_keys table exists)
+verify_bootstrap_ready() {
+    log "🔍 Verifying bootstrap functionality (api_keys table)..."
+    
+    local alb_endpoint=$(get_alb_endpoint)
+    if [[ -z "$alb_endpoint" ]]; then
+        error "Could not get ALB endpoint for bootstrap verification"
+        return 1
+    fi
+    
+    # Try the bootstrap status endpoint - it should NOT return 500 error if api_keys table exists
+    local bootstrap_response=$(curl -s "$alb_endpoint/api/v1/bootstrap/status" 2>/dev/null || echo "failed")
+    local has_error=$(echo "$bootstrap_response" | jq -r '.detail' 2>/dev/null | grep -i "error" || echo "")
+    
+    if [[ -z "$has_error" ]]; then
+        success "Bootstrap endpoint working - api_keys table exists"
+        log "Bootstrap status: $(echo "$bootstrap_response" | jq -r '.status' 2>/dev/null || echo 'unknown')"
+        return 0
+    else
+        warning "Bootstrap endpoint error - api_keys table may not exist: $has_error"
+        return 1
+    fi
+}
+
 # Main migration function
 main() {
     echo ""
@@ -218,14 +290,14 @@ main() {
         return 1
     fi
     
-    # Step 2: Check if tables already exist before running migration
-    if verify_tables_via_application; then
-        success "🎉 Database tables already exist and are accessible"
-        success "   No migration needed - application can connect to database and access tables"
+    # Step 2: Check if all required tables exist, specifically bootstrap functionality
+    if verify_tables_via_application && verify_bootstrap_ready; then
+        success "🎉 All database tables exist and bootstrap is ready"
+        success "   No migration needed - application fully functional"
         return 0
     fi
     
-    log "Database tables not found or not accessible - proceeding with migration..."
+    log "Database tables incomplete or bootstrap not ready - proceeding with migration..."
     
     # Step 3: Try Alembic migration
     if run_alembic_migration; then
@@ -235,17 +307,18 @@ main() {
     fi
     
     # Step 4: Final verification after migration attempt
-    if verify_tables_via_application; then
+    if verify_tables_via_application && verify_bootstrap_ready; then
         success "🎉 Database migration completed successfully"
-        success "   Application can connect to database and access tables"
+        success "   Application fully functional with all required tables"
+        success "   Bootstrap endpoint ready for API key creation"
         return 0
     else
-        error "Database tables are still not properly accessible after migration attempt"
-        log "📋 Manual investigation may be required:"
-        log "   1. Check application logs for database errors"
-        log "   2. Verify DATABASE_URL environment variable"
-        log "   3. Check PostgreSQL database directly"
-        log "   4. Check ECS task logs: aws logs tail /ecs/youtube-downloader-dev-app --follow"
+        error "Database migration may have failed or api_keys table still missing"
+        log "📋 Troubleshooting steps:"
+        log "   1. Check migration task logs: aws logs tail /ecs/youtube-downloader-dev-app --follow"
+        log "   2. Verify Alembic migrations exist: ls alembic/versions/"
+        log "   3. Check for URL encoding issues in database password"
+        log "   4. Test bootstrap endpoint: curl ALB_DNS/api/v1/bootstrap/status"
         return 1
     fi
 }

@@ -187,6 +187,12 @@ deploy_all_phases() {
     if "${SCRIPT_DIR}/migrate-database-simple.sh"; then
         success "✅ Phase 6H COMPLETED: Database tables ready (api_keys, download_jobs, alembic_version)"
         
+        # Restart ECS services to pick up new database schema
+        log "Restarting ECS services to refresh database connections..."
+        [[ -n "$CLUSTER_NAME" && -n "$APP_SERVICE_NAME" ]] && aws ecs update-service --cluster "$CLUSTER_NAME" --service "$APP_SERVICE_NAME" --force-new-deployment &>/dev/null
+        [[ -n "$CLUSTER_NAME" && -n "$WORKER_SERVICE_NAME" ]] && aws ecs update-service --cluster "$CLUSTER_NAME" --service "$WORKER_SERVICE_NAME" --force-new-deployment &>/dev/null
+        sleep 30  # Allow services to restart with new schema
+        
         # Additional verification via application health check
         log "Performing application-level database verification..."
         sleep 5  # Allow services to register the new tables
