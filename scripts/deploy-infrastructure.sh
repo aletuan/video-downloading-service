@@ -177,13 +177,40 @@ deploy_all_phases() {
     
     # Phase 6H: Database Migration
     echo ""
-    log "🗄️  Phase 6H: Database Migration"
-    cd "$TERRAFORM_DIR"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    log "🗄️  Phase 6H: Database Migration & Schema Setup"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
-    if terraform apply -target=null_resource.database_migration -auto-approve; then
-        success "Database tables created (api_keys, download_jobs, alembic_version)"
+    # Use dedicated migration script for better error handling and progress tracking
+    log "Running database migration using dedicated script..."
+    
+    if "${SCRIPT_DIR}/migrate-database-simple.sh"; then
+        success "✅ Phase 6H COMPLETED: Database tables ready (api_keys, download_jobs, alembic_version)"
+        
+        # Additional verification via application health check
+        log "Performing application-level database verification..."
+        sleep 5  # Allow services to register the new tables
+        
+        ALB_ENDPOINT=$(get_terraform_output "alb_endpoint")
+        if [[ -n "$ALB_ENDPOINT" ]]; then
+            DB_HEALTH=$(curl -s "$ALB_ENDPOINT/health/detailed" 2>/dev/null | jq -r '.checks.database.status' 2>/dev/null || echo "unknown")
+            if [[ "$DB_HEALTH" == "healthy" ]]; then
+                success "✅ Application database health check: PASSED"
+            else
+                warning "⚠️  Application database health check: $DB_HEALTH"
+            fi
+        fi
     else
-        warning "Database migration failed - API endpoints may not work properly"
+        error "❌ Phase 6H FAILED: Database migration unsuccessful"
+        warning "⚠️  API endpoints may not work properly without database tables"
+        log "📋 Troubleshooting steps:"
+        log "   1. Check migration logs: /tmp/database-migration.log"
+        log "   2. Verify database connectivity: curl $ALB_ENDPOINT/health/detailed"
+        log "   3. Run manual migration: ./scripts/migrate-database-simple.sh"
+        log "   4. Check ECS task logs: aws logs describe-log-groups --log-group-name-prefix /ecs/"
+        
+        # Don't fail deployment completely - let it continue for debugging
+        warning "⚠️  Continuing deployment for debugging purposes..."
     fi
     
     # Final Health Check
@@ -245,6 +272,7 @@ show_deployment_summary() {
     echo ""
     log "📁 Full outputs saved to: /tmp/terraform-final-outputs.txt"
     log "📁 Deployment log saved to: $LOG_FILE"
+    log "📁 Database migration log saved to: /tmp/database-migration.log"
 }
 
 # Rollback function
