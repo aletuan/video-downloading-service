@@ -2,7 +2,8 @@ import asyncio
 import logging
 import os
 import tempfile
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any, Callable
 import uuid
@@ -98,7 +99,18 @@ class YouTubeDownloader:
             'failed_downloads': 0,
             'cookie_fallbacks': 0,
             'rate_limit_hits': 0,
-            'integrity_failures': 0
+            'integrity_failures': 0,
+            'consecutive_failures': 0,
+            'last_failure_time': None,
+            'alert_sent': False
+        }
+        
+        # Exponential backoff configuration
+        self.backoff_config = {
+            'initial_delay': 1.0,  # seconds
+            'max_delay': 300.0,    # 5 minutes max
+            'backoff_factor': 2.0,
+            'max_retries': 3
         }
         
         logger.info(f"YouTubeDownloader initialized with storage: {type(self.storage).__name__}, cookies_enabled: {self.cookies_enabled}")
@@ -347,9 +359,11 @@ class YouTubeDownloader:
                 await loop.run_in_executor(None, _download)
                 download_success = True
                 
-                # Track successful cookie usage
+                # Reset consecutive failures on success
                 if 'cookiefile' in options and self.cookies_enabled:
                     self.cookie_stats['successful_downloads'] += 1
+                    self.cookie_stats['consecutive_failures'] = 0
+                    self.cookie_stats['alert_sent'] = False
                     logger.info(f"Download succeeded with cookies for job {job_id}")
                     
             except (DownloadError, ExtractorError) as e:
@@ -358,6 +372,22 @@ class YouTubeDownloader:
                 # Check if this is a cookie-related authentication error
                 if self._is_cookie_related_error(error_msg):
                     logger.warning(f"Cookie-related download error detected: {error_msg}")
+                    
+                    # Track failure and check if alerts should be sent
+                    if 'cookiefile' in options:
+                        self.cookie_stats['failed_downloads'] += 1
+                        self.cookie_stats['consecutive_failures'] += 1
+                        self.cookie_stats['last_failure_time'] = time.time()
+                        
+                        # Send alert if consecutive failures exceed threshold
+                        await self._check_and_send_cookie_alerts()
+                        
+                        # Apply exponential backoff if multiple failures
+                        if self.cookie_stats['consecutive_failures'] > 1:
+                            backoff_delay = await self._calculate_exponential_backoff()
+                            if backoff_delay > 0:
+                                logger.info(f"Applying exponential backoff: {backoff_delay:.2f} seconds")
+                                await asyncio.sleep(backoff_delay)
                     
                     # Try without cookies as fallback
                     if 'cookiefile' in options:
@@ -626,6 +656,92 @@ class YouTubeDownloader:
                 if total_attempts > 0 else 0, 2
             )
         }
+    
+    async def _calculate_exponential_backoff(self) -> float:
+        """
+        Calculate exponential backoff delay based on consecutive failures.
+        
+        Returns:
+            float: Backoff delay in seconds
+        """
+        failures = self.cookie_stats['consecutive_failures']
+        if failures <= 1:
+            return 0.0
+        
+        # Calculate exponential backoff: initial_delay * (backoff_factor ^ (failures - 2))
+        delay = (self.backoff_config['initial_delay'] * 
+                (self.backoff_config['backoff_factor'] ** (failures - 2)))
+        
+        # Cap at max delay
+        delay = min(delay, self.backoff_config['max_delay'])
+        
+        logger.info(f"Calculated exponential backoff: {delay:.2f}s for {failures} consecutive failures")
+        return delay
+    
+    async def _check_and_send_cookie_alerts(self) -> None:
+        """
+        Check if administrator alerts should be sent for cookie issues.
+        """
+        consecutive_failures = self.cookie_stats['consecutive_failures']
+        alert_threshold = 5  # Send alert after 5 consecutive failures
+        
+        # Send alert if threshold exceeded and alert not already sent recently
+        if consecutive_failures >= alert_threshold and not self.cookie_stats['alert_sent']:
+            await self._send_cookie_refresh_alert()
+            self.cookie_stats['alert_sent'] = True
+            
+            logger.critical(
+                f"Cookie refresh alert sent after {consecutive_failures} consecutive failures"
+            )
+        
+        # Log warnings at different thresholds
+        if consecutive_failures == 3:
+            logger.warning("Cookie authentication showing signs of failure - monitoring closely")
+        elif consecutive_failures >= 10:
+            logger.critical(
+                f"Cookie system heavily degraded: {consecutive_failures} consecutive failures"
+            )
+    
+    async def _send_cookie_refresh_alert(self) -> None:
+        """
+        Send administrator alert when cookies need refresh.
+        
+        This method can be extended to integrate with alerting systems like:
+        - Email notifications
+        - Slack/Teams webhooks
+        - PagerDuty/Opsgenie
+        - CloudWatch alarms
+        """
+        alert_data = {
+            'alert_type': 'cookie_refresh_required',
+            'timestamp': datetime.now().isoformat(),
+            'consecutive_failures': self.cookie_stats['consecutive_failures'],
+            'last_failure_time': self.cookie_stats['last_failure_time'],
+            'total_failed_downloads': self.cookie_stats['failed_downloads'],
+            'success_rate': self.get_cookie_statistics()['success_rate_percent'],
+            'recommended_action': 'Update YouTube cookies using scripts/upload-cookies.py',
+            'urgency': 'high' if self.cookie_stats['consecutive_failures'] >= 10 else 'medium'
+        }
+        
+        # Log the alert (this could be extended to send to external systems)
+        logger.critical(
+            f"COOKIE REFRESH ALERT: {json.dumps(alert_data, indent=2)}"
+        )
+        
+        # TODO: Integrate with actual alerting systems
+        # Examples:
+        # await self._send_email_alert(alert_data)
+        # await self._send_slack_notification(alert_data)
+        # await self._trigger_cloudwatch_alarm(alert_data)
+        
+        # For now, we'll create a file-based alert that monitoring systems can detect
+        try:
+            alert_file = self.temp_dir / "cookie_refresh_alert.json"
+            async with aiofiles.open(alert_file, 'w') as f:
+                await f.write(json.dumps(alert_data, indent=2))
+            logger.info(f"Alert file created: {alert_file}")
+        except Exception as e:
+            logger.error(f"Failed to create alert file: {e}")
     
     async def get_available_formats(self, url: str) -> List[Dict[str, Any]]:
         """
