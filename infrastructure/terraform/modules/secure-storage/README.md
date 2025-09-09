@@ -47,7 +47,7 @@ module "secure_storage" {
 
 The module creates the following S3 directory structure:
 
-```
+```text
 s3://bucket-name/
 ├── cookies/
 │   ├── youtube-cookies-active.txt
