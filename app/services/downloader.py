@@ -326,10 +326,18 @@ class YouTubeDownloader:
             if progress_callback:
                 progress_callback(10.0, "Preparing download...")
             
+            # Validate cookie status before download
+            cookie_status = await self._validate_cookie_status_for_download()
+            if progress_callback and cookie_status['message']:
+                progress_callback(15.0, cookie_status['message'])
+            
             # Create progress tracker
             progress_tracker = DownloadProgress(job_id, progress_callback)
             
             # Configure yt-dlp options with secure cookie integration
+            if progress_callback and self.cookies_enabled:
+                progress_callback(20.0, "Configuring secure authentication...")
+            
             options = await self._get_yt_dlp_options(
                 output_path=str(temp_output_dir),
                 quality=quality if not audio_only else "bestaudio",
@@ -430,10 +438,15 @@ class YouTubeDownloader:
             if progress_callback:
                 progress_callback(100.0, "Download completed successfully!")
             
+            # Include cookie status in job metadata
+            cookie_metadata = self.get_cookie_statistics() if self.cookies_enabled else {'cookies_enabled': False}
+            
             return {
                 **result,
                 **storage_result,
-                'metadata': info
+                'metadata': info,
+                'cookie_status': cookie_metadata,
+                'download_method': 'with_cookies' if 'cookiefile' in options else 'without_cookies'
             }
             
         except Exception as e:
@@ -742,6 +755,162 @@ class YouTubeDownloader:
             logger.info(f"Alert file created: {alert_file}")
         except Exception as e:
             logger.error(f"Failed to create alert file: {e}")
+    
+    async def _validate_cookie_status_for_download(self) -> Dict[str, Any]:
+        """
+        Validate cookie status before starting download and provide user-friendly status.
+        
+        Returns:
+            dict: Cookie validation status with user message
+        """
+        if not self.cookies_enabled or not self.cookie_manager:
+            return {
+                'status': 'disabled',
+                'message': "Downloading without authentication",
+                'details': "Cookie authentication is disabled"
+            }
+        
+        try:
+            # Check cookie freshness
+            freshness_status = await self.cookie_manager.validate_cookie_freshness()
+            
+            # Check for recent failures
+            consecutive_failures = self.cookie_stats['consecutive_failures']
+            
+            if consecutive_failures >= 5:
+                return {
+                    'status': 'degraded',
+                    'message': f"Cookie authentication degraded ({consecutive_failures} failures)",
+                    'details': "May fallback to non-authenticated download"
+                }
+            elif consecutive_failures >= 3:
+                return {
+                    'status': 'warning',
+                    'message': "Cookie authentication showing issues",
+                    'details': f"{consecutive_failures} recent failures detected"
+                }
+            elif freshness_status.get('warnings'):
+                return {
+                    'status': 'warning',
+                    'message': "Cookies may need refresh soon",
+                    'details': "; ".join(freshness_status['warnings'])
+                }
+            else:
+                return {
+                    'status': 'healthy',
+                    'message': "Using secure authentication",
+                    'details': "Cookie authentication active and healthy"
+                }
+                
+        except Exception as e:
+            logger.warning(f"Cookie status validation failed: {e}")
+            return {
+                'status': 'error',
+                'message': "Cookie validation failed, using fallback",
+                'details': str(e)
+            }
+    
+    def get_cookie_error_message(self, error: Exception, user_friendly: bool = True) -> str:
+        """
+        Generate user-friendly error messages for cookie-related issues.
+        
+        Args:
+            error: The exception that occurred
+            user_friendly: Whether to return user-friendly or technical message
+            
+        Returns:
+            str: Formatted error message
+        """
+        error_msg = str(error)
+        
+        if isinstance(error, CookieRateLimitError):
+            if user_friendly:
+                return "Download temporarily limited due to authentication rate limits. Please try again in a few minutes."
+            else:
+                return f"Cookie rate limit exceeded: {error_msg}"
+                
+        elif isinstance(error, CookieIntegrityError):
+            if user_friendly:
+                return "Authentication security check failed. Administrator has been notified."
+            else:
+                return f"Cookie integrity validation failed: {error_msg}"
+                
+        elif isinstance(error, CookieExpiredError):
+            if user_friendly:
+                return "Authentication credentials have expired. Download will attempt without authentication."
+            else:
+                return f"Cookie expired: {error_msg}"
+                
+        elif isinstance(error, CookieValidationError):
+            if user_friendly:
+                return "Authentication validation failed. Attempting alternative download method."
+            else:
+                return f"Cookie validation error: {error_msg}"
+                
+        elif isinstance(error, CookieDownloadError):
+            if user_friendly:
+                return "Unable to retrieve authentication credentials. Download will proceed without authentication."
+            else:
+                return f"Cookie download error: {error_msg}"
+        else:
+            # Generic error
+            if user_friendly:
+                return "Authentication issue encountered. Download will attempt alternative method."
+            else:
+                return f"Cookie error: {error_msg}"
+    
+    async def check_cookie_refresh_needed(self) -> Dict[str, Any]:
+        """
+        Check if cookie refresh is needed and provide notification data.
+        
+        Returns:
+            dict: Cookie refresh status and notification data
+        """
+        if not self.cookies_enabled or not self.cookie_manager:
+            return {'refresh_needed': False, 'reason': 'cookies_disabled'}
+        
+        try:
+            freshness_status = await self.cookie_manager.validate_cookie_freshness()
+            consecutive_failures = self.cookie_stats['consecutive_failures']
+            success_rate = self.get_cookie_statistics()['success_rate_percent']
+            
+            # Determine if refresh is needed based on multiple factors
+            refresh_needed = (
+                consecutive_failures >= 5 or  # Multiple recent failures
+                success_rate < 70 or  # Low success rate
+                freshness_status.get('rotation_due', False) or  # Scheduled rotation due
+                any('expiring' in warning.lower() for warning in freshness_status.get('warnings', []))
+            )
+            
+            if refresh_needed:
+                return {
+                    'refresh_needed': True,
+                    'urgency': 'high' if consecutive_failures >= 10 or success_rate < 50 else 'medium',
+                    'reasons': {
+                        'consecutive_failures': consecutive_failures,
+                        'success_rate': success_rate,
+                        'rotation_due': freshness_status.get('rotation_due', False),
+                        'warnings': freshness_status.get('warnings', [])
+                    },
+                    'recommended_action': 'Update YouTube cookies using scripts/upload-cookies.py',
+                    'next_check': datetime.now() + timedelta(hours=1)
+                }
+            else:
+                return {
+                    'refresh_needed': False,
+                    'status': 'healthy',
+                    'success_rate': success_rate,
+                    'next_check': datetime.now() + timedelta(hours=6)
+                }
+                
+        except Exception as e:
+            logger.error(f"Cookie refresh check failed: {e}")
+            return {
+                'refresh_needed': True,
+                'urgency': 'high',
+                'reason': 'check_failed',
+                'error': str(e)
+            }
     
     async def get_available_formats(self, url: str) -> List[Dict[str, Any]]:
         """
