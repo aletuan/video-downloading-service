@@ -134,12 +134,12 @@ This document tracks the implementation of enhanced YouTube download functionali
 
 ### ECS Task Role Permissions
 
-- [ ] Update ECS task role with S3 cookie bucket permissions
-- [ ] Add KMS permissions for cookie encryption/decryption
-- [ ] Implement least privilege access principle
-- [ ] Add CloudWatch logging permissions
-- [ ] Create parameter store access for encryption keys
-- [ ] Document all required permissions
+- [x] Update ECS task role with S3 cookie bucket permissions
+- [x] Add KMS permissions for cookie encryption/decryption
+- [x] Implement least privilege access principle
+- [x] Add CloudWatch logging permissions
+- [x] Create parameter store access for encryption keys
+- [x] Document all required permissions
 
 ### Terraform Infrastructure Updates
 

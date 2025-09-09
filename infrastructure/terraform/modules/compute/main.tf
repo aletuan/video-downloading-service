@@ -161,6 +161,82 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
   })
 }
 
+# Cookie Management IAM Policy (separate policy for better organization)
+resource "aws_iam_role_policy" "ecs_task_cookie_management" {
+  count = var.secure_storage_bucket_arn != "" ? 1 : 0
+  name  = "${var.project_name}-${var.environment}-ecs-cookie-management"
+  role  = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "SecureStorageS3Access"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket",
+          "s3:GetBucketVersioning",
+          "s3:ListBucketVersions",
+          "s3:GetObjectVersion"
+        ]
+        Resource = [
+          var.secure_storage_bucket_arn,
+          "${var.secure_storage_bucket_arn}/*"
+        ]
+      },
+      {
+        Sid    = "KMSKeyAccess"
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey",
+          "kms:GenerateDataKey"
+        ]
+        Resource = var.secure_storage_kms_key_arn != "" ? [var.secure_storage_kms_key_arn] : []
+        Condition = var.secure_storage_kms_key_arn != "" ? {
+          StringEquals = {
+            "kms:ViaService" = "s3.${data.aws_region.current.name}.amazonaws.com"
+          }
+        } : {}
+      },
+      {
+        Sid    = "ParameterStoreAccess"
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath"
+        ]
+        Resource = [
+          "arn:aws:ssm:*:*:parameter/${var.project_name}/${var.environment}/cookie/*",
+          "arn:aws:ssm:*:*:parameter/${var.project_name}/${var.environment}/encryption/*"
+        ]
+      },
+      {
+        Sid    = "CloudWatchLogsAccess"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogGroups",
+          "logs:DescribeLogStreams"
+        ]
+        Resource = [
+          "${aws_cloudwatch_log_group.app.arn}:*",
+          "${aws_cloudwatch_log_group.worker.arn}:*"
+        ]
+      }
+    ]
+  })
+}
+
+# Get current AWS region and account ID for resource ARNs
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
 # FastAPI Task Definition
 resource "aws_ecs_task_definition" "app" {
   family                   = "${var.project_name}-${var.environment}-app"
@@ -195,6 +271,14 @@ resource "aws_ecs_task_definition" "app" {
         {
           name  = "S3_BUCKET_NAME"
           value = var.s3_bucket_name
+        },
+        {
+          name  = "COOKIE_S3_BUCKET"
+          value = var.secure_storage_bucket_name
+        },
+        {
+          name  = "AWS_REGION"
+          value = data.aws_region.current.name
         }
       ]
       
@@ -210,6 +294,11 @@ resource "aws_ecs_task_definition" "app" {
         {
           name      = "BOOTSTRAP_SETUP_TOKEN"
           valueFrom = var.bootstrap_token_parameter
+        },
+        # Cookie management configuration from Parameter Store
+        {
+          name      = "COOKIE_ENCRYPTION_KEY"
+          valueFrom = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/${var.environment}/cookie/encryption-key"
         }
       ]
       
@@ -266,6 +355,14 @@ resource "aws_ecs_task_definition" "worker" {
         {
           name  = "S3_BUCKET_NAME"
           value = var.s3_bucket_name
+        },
+        {
+          name  = "COOKIE_S3_BUCKET"
+          value = var.secure_storage_bucket_name
+        },
+        {
+          name  = "AWS_REGION"
+          value = data.aws_region.current.name
         }
       ]
       
@@ -277,6 +374,11 @@ resource "aws_ecs_task_definition" "worker" {
         {
           name      = "REDIS_URL"
           valueFrom = var.redis_url_parameter
+        },
+        # Cookie management configuration from Parameter Store
+        {
+          name      = "COOKIE_ENCRYPTION_KEY"
+          valueFrom = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/${var.environment}/cookie/encryption-key"
         }
       ]
       
@@ -357,5 +459,62 @@ resource "aws_ecs_service" "worker" {
   }
 }
 
-# Data source for current AWS region
-data "aws_region" "current" {}
+# =============================================================================
+# Cookie Management IAM Permissions Documentation
+# =============================================================================
+# 
+# This module implements comprehensive IAM permissions for secure cookie 
+# management in the YouTube download service. The permissions follow the 
+# principle of least privilege while enabling full cookie functionality.
+#
+# PERMISSIONS GRANTED:
+#
+# 1. SECURE STORAGE S3 ACCESS
+#    - Actions: GetObject, PutObject, DeleteObject, ListBucket, GetBucketVersioning, 
+#              ListBucketVersions, GetObjectVersion
+#    - Resource: Secure storage S3 bucket and all objects within it
+#    - Purpose: Download, upload, and manage cookie files securely
+#    - Security: Limited to specific bucket ARN provided via variable
+#
+# 2. KMS KEY ACCESS
+#    - Actions: Decrypt, DescribeKey, GenerateDataKey
+#    - Resource: KMS key used for S3 server-side encryption
+#    - Purpose: Decrypt encrypted cookie files from S3
+#    - Security: Limited to S3 service usage via ViaService condition
+#
+# 3. PARAMETER STORE ACCESS
+#    - Actions: GetParameter, GetParameters, GetParametersByPath
+#    - Resource: /project/environment/cookie/* and /project/environment/encryption/*
+#    - Purpose: Retrieve cookie encryption keys and configuration
+#    - Security: Limited to specific parameter path prefixes
+#
+# 4. CLOUDWATCH LOGS ACCESS
+#    - Actions: CreateLogStream, PutLogEvents, DescribeLogGroups, DescribeLogStreams
+#    - Resource: Application and worker CloudWatch log groups
+#    - Purpose: Enhanced logging for cookie operations and debugging
+#    - Security: Limited to specific log groups created by this module
+#
+# ENVIRONMENT VARIABLES PROVIDED:
+#
+# 1. COOKIE_S3_BUCKET: Name of the secure S3 bucket for cookie storage
+# 2. AWS_REGION: Current AWS region for SDK configuration
+# 3. COOKIE_ENCRYPTION_KEY: Retrieved from Parameter Store for in-memory encryption
+#
+# SECURITY CONSIDERATIONS:
+#
+# - All permissions are conditionally applied only when secure storage is configured
+# - KMS permissions are restricted to S3 service usage
+# - Parameter Store access is limited to specific path prefixes
+# - IAM policies are separate for better organization and management
+# - Least privilege principle is enforced throughout
+#
+# USAGE:
+#
+# To enable cookie management, provide the following variables:
+# - secure_storage_bucket_arn: ARN of the secure S3 bucket
+# - secure_storage_bucket_name: Name of the secure S3 bucket
+# - secure_storage_kms_key_arn: ARN of the KMS key (optional)
+#
+# If these variables are not provided, cookie management permissions are not applied.
+#
+# =============================================================================

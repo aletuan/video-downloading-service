@@ -46,6 +46,31 @@ variable "s3_bucket_name" {
   type        = string
 }
 
+# Cookie Management - Secure Storage Integration
+variable "secure_storage_bucket_arn" {
+  description = "ARN of the secure S3 bucket for cookie management"
+  type        = string
+  default     = ""
+}
+
+variable "secure_storage_bucket_name" {
+  description = "Name of the secure S3 bucket for cookie management"
+  type        = string
+  default     = ""
+}
+
+variable "secure_storage_kms_key_arn" {
+  description = "ARN of the KMS key used for secure storage encryption"
+  type        = string
+  default     = ""
+}
+
+variable "cookie_parameter_store_prefix" {
+  description = "Parameter Store prefix for cookie management configuration"
+  type        = string
+  default     = ""
+}
+
 # Container Images
 variable "app_image" {
   description = "Docker image for FastAPI application"
