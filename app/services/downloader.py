@@ -14,6 +14,7 @@ from yt_dlp.utils import DownloadError, ExtractorError
 
 from app.core.config import settings
 from app.core.storage import init_storage
+from app.core.cookie_manager import CookieManager, CookieDownloadError, CookieValidationError, CookieExpiredError, CookieRateLimitError, CookieIntegrityError
 from app.models.database import DownloadJob
 
 logger = logging.getLogger(__name__)
@@ -69,27 +70,48 @@ class YouTubeDownloader:
     extraction, and format conversion.
     """
     
-    def __init__(self, storage_handler=None):
+    def __init__(self, storage_handler=None, cookie_manager=None):
         """
         Initialize the YouTube downloader.
         
         Args:
             storage_handler: Storage handler instance, defaults to global storage
+            cookie_manager: Cookie manager instance for authenticated downloads
         """
         self.storage = storage_handler or init_storage()
         self.temp_dir = Path(tempfile.gettempdir()) / "youtube_service"
         self.temp_dir.mkdir(exist_ok=True)
         
-        logger.info(f"YouTubeDownloader initialized with storage: {type(self.storage).__name__}")
+        # Initialize cookie manager for anti-bot protection
+        try:
+            self.cookie_manager = cookie_manager or CookieManager()
+            self.cookies_enabled = True
+            logger.info("Cookie manager initialized for authenticated downloads")
+        except Exception as e:
+            logger.warning(f"Cookie manager initialization failed: {e}")
+            self.cookie_manager = None
+            self.cookies_enabled = False
+        
+        # Cookie-related metrics
+        self.cookie_stats = {
+            'successful_downloads': 0,
+            'failed_downloads': 0,
+            'cookie_fallbacks': 0,
+            'rate_limit_hits': 0,
+            'integrity_failures': 0
+        }
+        
+        logger.info(f"YouTubeDownloader initialized with storage: {type(self.storage).__name__}, cookies_enabled: {self.cookies_enabled}")
     
-    def _get_yt_dlp_options(
+    async def _get_yt_dlp_options(
         self, 
         output_path: str, 
         quality: str = "best",
         output_format: str = "mp4",
         extract_subtitles: bool = True,
         subtitle_langs: Optional[List[str]] = None,
-        progress_hook: Optional[Callable] = None
+        progress_hook: Optional[Callable] = None,
+        session_id: str = "default"
     ) -> Dict[str, Any]:
         """
         Get yt-dlp options based on user preferences.
@@ -101,9 +123,10 @@ class YouTubeDownloader:
             extract_subtitles: Whether to extract subtitles
             subtitle_langs: List of subtitle languages to extract
             progress_hook: Progress callback function
+            session_id: Session identifier for rate limiting
             
         Returns:
-            dict: yt-dlp options
+            dict: yt-dlp options with secure cookie integration
         """
         # Base options
         options = {
@@ -129,6 +152,46 @@ class YouTubeDownloader:
         # Format-specific options
         if output_format in ['mp4', 'mkv']:
             options['merge_output_format'] = output_format
+        
+        # Integrate secure cookie authentication
+        if self.cookies_enabled and self.cookie_manager:
+            try:
+                logger.info(f"Attempting to get secure cookies for session: {session_id}")
+                cookie_file_path = await self.cookie_manager.get_active_cookies(session_id)
+                options['cookiefile'] = cookie_file_path
+                logger.info(f"Successfully integrated cookies from: {cookie_file_path}")
+                
+            except CookieRateLimitError as e:
+                logger.warning(f"Cookie rate limit hit for session {session_id}: {e}")
+                self.cookie_stats['rate_limit_hits'] += 1
+                # Continue without cookies - will handle rate limiting at higher level
+                
+            except CookieIntegrityError as e:
+                logger.error(f"Cookie integrity validation failed: {e}")
+                self.cookie_stats['integrity_failures'] += 1
+                # Continue without cookies - integrity issues need manual intervention
+                
+            except (CookieDownloadError, CookieValidationError, CookieExpiredError) as e:
+                logger.warning(f"Cookie error for session {session_id}: {e}")
+                self.cookie_stats['failed_downloads'] += 1
+                
+                # Try backup cookies as fallback
+                try:
+                    logger.info("Attempting fallback to backup cookies")
+                    cookie_file_path = await self.cookie_manager.get_backup_cookies(session_id)
+                    options['cookiefile'] = cookie_file_path
+                    self.cookie_stats['cookie_fallbacks'] += 1
+                    logger.info(f"Successfully integrated backup cookies from: {cookie_file_path}")
+                    
+                except Exception as backup_error:
+                    logger.error(f"Backup cookies also failed: {backup_error}")
+                    # Continue without cookies
+                    
+            except Exception as e:
+                logger.error(f"Unexpected cookie error: {e}")
+                # Continue without cookies
+        else:
+            logger.info("Cookie authentication disabled or unavailable")
             
         return options
     
@@ -254,14 +317,15 @@ class YouTubeDownloader:
             # Create progress tracker
             progress_tracker = DownloadProgress(job_id, progress_callback)
             
-            # Configure yt-dlp options
-            options = self._get_yt_dlp_options(
+            # Configure yt-dlp options with secure cookie integration
+            options = await self._get_yt_dlp_options(
                 output_path=str(temp_output_dir),
                 quality=quality if not audio_only else "bestaudio",
                 output_format="mp3" if audio_only else output_format,
                 extract_subtitles=include_transcription,
                 subtitle_langs=subtitle_languages,
-                progress_hook=progress_tracker
+                progress_hook=progress_tracker,
+                session_id=job_id  # Use job_id as session identifier
             )
             
             if audio_only:
@@ -271,14 +335,53 @@ class YouTubeDownloader:
                     'preferredcodec': 'mp3',
                 }]
             
-            # Download the video
+            # Download the video with enhanced error handling
+            download_success = False
             loop = asyncio.get_event_loop()
             
             def _download():
                 with yt_dlp.YoutubeDL(options) as ydl:
                     return ydl.download([url])
             
-            await loop.run_in_executor(None, _download)
+            try:
+                await loop.run_in_executor(None, _download)
+                download_success = True
+                
+                # Track successful cookie usage
+                if 'cookiefile' in options and self.cookies_enabled:
+                    self.cookie_stats['successful_downloads'] += 1
+                    logger.info(f"Download succeeded with cookies for job {job_id}")
+                    
+            except (DownloadError, ExtractorError) as e:
+                error_msg = str(e)
+                
+                # Check if this is a cookie-related authentication error
+                if self._is_cookie_related_error(error_msg):
+                    logger.warning(f"Cookie-related download error detected: {error_msg}")
+                    
+                    # Try without cookies as fallback
+                    if 'cookiefile' in options:
+                        logger.info("Attempting download without cookies as fallback")
+                        fallback_options = options.copy()
+                        del fallback_options['cookiefile']
+                        
+                        try:
+                            def _fallback_download():
+                                with yt_dlp.YoutubeDL(fallback_options) as ydl:
+                                    return ydl.download([url])
+                            
+                            await loop.run_in_executor(None, _fallback_download)
+                            download_success = True
+                            logger.info(f"Fallback download without cookies succeeded for job {job_id}")
+                            
+                        except Exception as fallback_error:
+                            logger.error(f"Fallback download also failed: {fallback_error}")
+                            raise
+                    else:
+                        raise
+                else:
+                    # Non-cookie related error, re-raise
+                    raise
             
             if progress_callback:
                 progress_callback(80.0, "Processing downloaded files...")
@@ -455,6 +558,74 @@ class YouTubeDownloader:
                 logger.debug(f"Cleaned up temporary directory: {temp_dir}")
         except Exception as e:
             logger.error(f"Error cleaning up temporary files: {e}")
+        
+        # Clean up cookie temporary files
+        if self.cookies_enabled and self.cookie_manager:
+            try:
+                await self.cookie_manager.cleanup_temporary_files(max_age_hours=1)
+            except Exception as e:
+                logger.warning(f"Failed to cleanup cookie temporary files: {e}")
+    
+    def _is_cookie_related_error(self, error_message: str) -> bool:
+        """
+        Check if the error message indicates a cookie-related authentication issue.
+        
+        Args:
+            error_message: Error message from yt-dlp
+            
+        Returns:
+            bool: True if error is likely cookie-related
+        """
+        cookie_error_patterns = [
+            'sign in',
+            'login required',
+            'authentication',
+            'unavailable',
+            'private video',
+            'age-restricted',
+            'content warning',
+            'verify your account',
+            '403',
+            'forbidden',
+            'blocked',
+            'rate limit',
+            'too many requests'
+        ]
+        
+        error_lower = error_message.lower()
+        return any(pattern in error_lower for pattern in cookie_error_patterns)
+    
+    def get_cookie_statistics(self) -> Dict[str, Any]:
+        """
+        Get cookie usage statistics for monitoring.
+        
+        Returns:
+            dict: Cookie usage statistics
+        """
+        total_attempts = (
+            self.cookie_stats['successful_downloads'] + 
+            self.cookie_stats['failed_downloads']
+        )
+        
+        success_rate = (
+            (self.cookie_stats['successful_downloads'] / total_attempts * 100) 
+            if total_attempts > 0 else 0
+        )
+        
+        return {
+            'cookies_enabled': self.cookies_enabled,
+            'total_download_attempts': total_attempts,
+            'successful_downloads': self.cookie_stats['successful_downloads'],
+            'failed_downloads': self.cookie_stats['failed_downloads'],
+            'cookie_fallbacks': self.cookie_stats['cookie_fallbacks'],
+            'rate_limit_hits': self.cookie_stats['rate_limit_hits'],
+            'integrity_failures': self.cookie_stats['integrity_failures'],
+            'success_rate_percent': round(success_rate, 2),
+            'fallback_rate_percent': round(
+                (self.cookie_stats['cookie_fallbacks'] / total_attempts * 100) 
+                if total_attempts > 0 else 0, 2
+            )
+        }
     
     async def get_available_formats(self, url: str) -> List[Dict[str, Any]]:
         """
