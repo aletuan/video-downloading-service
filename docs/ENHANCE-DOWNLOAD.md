@@ -106,12 +106,12 @@ This document tracks the implementation of enhanced YouTube download functionali
 
 ### Configuration Settings
 
-- [ ] Add cookie management settings to `app/core/config.py`
-- [ ] Define S3 bucket configuration variables
-- [ ] Add cookie refresh intervals and validation settings
-- [ ] Implement encryption key configuration
-- [ ] Add cookie expiration thresholds
-- [ ] Create debug and logging level settings
+- [x] Add cookie management settings to `app/core/config.py`
+- [x] Define S3 bucket configuration variables
+- [x] Add cookie refresh intervals and validation settings
+- [x] Implement encryption key configuration
+- [x] Add cookie expiration thresholds
+- [x] Create debug and logging level settings
 
 ### Environment Variables
 
