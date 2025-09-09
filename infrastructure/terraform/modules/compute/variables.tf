@@ -47,28 +47,34 @@ variable "s3_bucket_name" {
 }
 
 # Cookie Management - Secure Storage Integration
-variable "secure_storage_bucket_arn" {
-  description = "ARN of the secure S3 bucket for cookie management"
-  type        = string
-  default     = ""
-}
-
-variable "secure_storage_bucket_name" {
-  description = "Name of the secure S3 bucket for cookie management"
-  type        = string
-  default     = ""
-}
-
-variable "secure_storage_kms_key_arn" {
-  description = "ARN of the KMS key used for secure storage encryption"
-  type        = string
-  default     = ""
-}
-
-variable "cookie_parameter_store_prefix" {
-  description = "Parameter Store prefix for cookie management configuration"
-  type        = string
-  default     = ""
+variable "secure_storage_config" {
+  description = "Secure storage configuration from secure-storage module"
+  type = object({
+    bucket_name                = string
+    bucket_arn                 = string
+    cookie_path_prefix         = string
+    active_cookie_key          = string
+    backup_cookie_key          = string
+    metadata_key               = string
+    region                     = string
+    versioning_enabled         = bool
+    encryption_enabled         = bool
+    access_logging_enabled     = bool
+    lifecycle_policy_enabled   = bool
+  })
+  default = {
+    bucket_name                = ""
+    bucket_arn                 = ""
+    cookie_path_prefix         = ""
+    active_cookie_key          = ""
+    backup_cookie_key          = ""
+    metadata_key               = ""
+    region                     = ""
+    versioning_enabled         = false
+    encryption_enabled         = false
+    access_logging_enabled     = false
+    lifecycle_policy_enabled   = false
+  }
 }
 
 # Container Images

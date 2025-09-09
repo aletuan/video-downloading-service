@@ -143,12 +143,12 @@ This document tracks the implementation of enhanced YouTube download functionali
 
 ### Terraform Infrastructure Updates
 
-- [ ] Update `infrastructure/terraform/modules/compute/main.tf`
-- [ ] Add S3 bucket ARN to task role policy
-- [ ] Implement environment variables for cookie configuration
-- [ ] Add parameter store integration for encryption keys
-- [ ] Update task definition with new environment variables
-- [ ] Add dependency on secure storage module
+- [x] Update `infrastructure/terraform/modules/compute/main.tf`
+- [x] Add S3 bucket ARN to task role policy
+- [x] Implement environment variables for cookie configuration
+- [x] Add parameter store integration for encryption keys
+- [x] Update task definition with new environment variables
+- [x] Add dependency on secure storage module
 
 ### Deployment Configuration
 

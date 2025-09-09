@@ -81,6 +81,28 @@ module "storage" {
   cors_allowed_origins       = var.storage_cors_allowed_origins
 }
 
+# Secure Storage Module for Cookie Management
+module "secure_storage" {
+  source = "../../modules/secure-storage"
+
+  project_name = var.project_name
+  environment  = local.environment
+  
+  # Encryption configuration
+  kms_key_description = "KMS key for secure cookie storage encryption"
+  enable_key_rotation = true
+  
+  # Access control
+  allowed_service_principals = [
+    "ecs-tasks.amazonaws.com"
+  ]
+  
+  # Lifecycle management
+  lifecycle_expiration_days    = 90
+  lifecycle_noncurrent_days    = 30
+  lifecycle_abort_incomplete_days = 7
+}
+
 # Database Module
 module "database" {
   source = "../../modules/database"
@@ -150,6 +172,9 @@ module "compute" {
   database_url_parameter  = aws_ssm_parameter.database_url.name
   redis_url_parameter     = aws_ssm_parameter.redis_url.name
   bootstrap_token_parameter = aws_ssm_parameter.bootstrap_token.name
+  
+  # Secure Storage Integration
+  secure_storage_config = module.secure_storage.s3_config
   
   # Container Images (will need to be built and pushed to ECR)
   app_image    = var.app_image

@@ -163,7 +163,7 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
 
 # Cookie Management IAM Policy (separate policy for better organization)
 resource "aws_iam_role_policy" "ecs_task_cookie_management" {
-  count = var.secure_storage_bucket_arn != "" ? 1 : 0
+  count = var.secure_storage_config.bucket_arn != "" ? 1 : 0
   name  = "${var.project_name}-${var.environment}-ecs-cookie-management"
   role  = aws_iam_role.ecs_task.id
 
@@ -175,32 +175,18 @@ resource "aws_iam_role_policy" "ecs_task_cookie_management" {
         Effect = "Allow"
         Action = [
           "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject",
-          "s3:ListBucket",
-          "s3:GetBucketVersioning",
-          "s3:ListBucketVersions",
-          "s3:GetObjectVersion"
+          "s3:GetObjectVersion",
+          "s3:ListBucket"
         ]
         Resource = [
-          var.secure_storage_bucket_arn,
-          "${var.secure_storage_bucket_arn}/*"
+          var.secure_storage_config.bucket_arn,
+          "${var.secure_storage_config.bucket_arn}/*"
         ]
-      },
-      {
-        Sid    = "KMSKeyAccess"
-        Effect = "Allow"
-        Action = [
-          "kms:Decrypt",
-          "kms:DescribeKey",
-          "kms:GenerateDataKey"
-        ]
-        Resource = var.secure_storage_kms_key_arn != "" ? [var.secure_storage_kms_key_arn] : []
-        Condition = var.secure_storage_kms_key_arn != "" ? {
-          StringEquals = {
-            "kms:ViaService" = "s3.${data.aws_region.current.name}.amazonaws.com"
+        Condition = {
+          StringLike = {
+            "s3:prefix" = "${var.secure_storage_config.cookie_path_prefix}*"
           }
-        } : {}
+        }
       },
       {
         Sid    = "ParameterStoreAccess"
@@ -274,7 +260,7 @@ resource "aws_ecs_task_definition" "app" {
         },
         {
           name  = "COOKIE_S3_BUCKET"
-          value = var.secure_storage_bucket_name
+          value = var.secure_storage_config.bucket_name
         },
         {
           name  = "AWS_REGION"
@@ -358,7 +344,7 @@ resource "aws_ecs_task_definition" "worker" {
         },
         {
           name  = "COOKIE_S3_BUCKET"
-          value = var.secure_storage_bucket_name
+          value = var.secure_storage_config.bucket_name
         },
         {
           name  = "AWS_REGION"
