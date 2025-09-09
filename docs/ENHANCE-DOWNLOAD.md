@@ -191,12 +191,12 @@ This document tracks the implementation of enhanced YouTube download functionali
 
 ### Unit Testing
 
-- [ ] Create unit tests for `CookieManager` class
-- [ ] Test cookie validation and expiration logic
-- [ ] Implement S3 integration testing with mocks
-- [ ] Add encryption/decryption testing
-- [ ] Create error handling test cases
-- [ ] Test temporary file cleanup functionality
+- [x] Create unit tests for `CookieManager` class
+- [x] Test cookie validation and expiration logic
+- [x] Implement S3 integration testing with mocks
+- [x] Add encryption/decryption testing
+- [x] Create error handling test cases
+- [x] Test temporary file cleanup functionality
 
 ### Integration Testing
 
