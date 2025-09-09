@@ -4,6 +4,8 @@ from typing import Optional
 import secrets
 import os
 import logging
+import base64
+from cryptography.fernet import Fernet
 
 
 class Settings(BaseSettings):
@@ -161,6 +163,177 @@ class Settings(BaseSettings):
         
         return validation_results
     
+    @staticmethod
+    def encrypt_sensitive_value(value: str, key: Optional[str] = None) -> str:
+        """
+        Encrypt a sensitive configuration value.
+        
+        Args:
+            value: The value to encrypt
+            key: Optional encryption key (auto-generated if not provided)
+            
+        Returns:
+            str: Base64-encoded encrypted value with key prefix
+        """
+        if not value:
+            return value
+            
+        try:
+            # Generate key if not provided
+            if not key:
+                key = Fernet.generate_key()
+            elif isinstance(key, str):
+                key = key.encode('utf-8')
+            
+            # Ensure key is properly formatted
+            if len(key) != 44:  # Fernet key length
+                # Pad or hash key to correct length
+                key = base64.urlsafe_b64encode(key.ljust(32)[:32])
+            
+            cipher_suite = Fernet(key)
+            encrypted_value = cipher_suite.encrypt(value.encode('utf-8'))
+            
+            # Return key:encrypted_value format for decryption
+            key_b64 = base64.urlsafe_b64encode(key).decode('utf-8')
+            encrypted_b64 = base64.urlsafe_b64encode(encrypted_value).decode('utf-8')
+            
+            return f"encrypted:{key_b64}:{encrypted_b64}"
+            
+        except Exception as e:
+            logger.warning(f"Failed to encrypt sensitive value: {e}")
+            return value
+    
+    @staticmethod
+    def decrypt_sensitive_value(encrypted_value: str) -> str:
+        """
+        Decrypt a sensitive configuration value.
+        
+        Args:
+            encrypted_value: The encrypted value in format "encrypted:key:value"
+            
+        Returns:
+            str: Decrypted value
+        """
+        if not encrypted_value or not encrypted_value.startswith("encrypted:"):
+            return encrypted_value
+            
+        try:
+            parts = encrypted_value.split(":", 2)
+            if len(parts) != 3:
+                return encrypted_value
+                
+            _, key_b64, encrypted_b64 = parts
+            key = base64.urlsafe_b64decode(key_b64.encode('utf-8'))
+            encrypted_data = base64.urlsafe_b64decode(encrypted_b64.encode('utf-8'))
+            
+            cipher_suite = Fernet(key)
+            decrypted_value = cipher_suite.decrypt(encrypted_data)
+            
+            return decrypted_value.decode('utf-8')
+            
+        except Exception as e:
+            logger.error(f"Failed to decrypt sensitive value: {e}")
+            return encrypted_value
+    
+    def get_decrypted_encryption_key(self) -> Optional[str]:
+        """
+        Get the decrypted cookie encryption key.
+        
+        Returns:
+            str: Decrypted encryption key or None if not configured
+        """
+        if not self.cookie_encryption_key:
+            return None
+        return self.decrypt_sensitive_value(self.cookie_encryption_key)
+    
+    def validate_all_settings(self) -> dict:
+        """
+        Comprehensive validation of all settings with detailed results.
+        
+        Returns:
+            dict: Complete validation results
+        """
+        validation_results = {
+            'valid': True,
+            'warnings': [],
+            'errors': [],
+            'recommendations': [],
+            'checks_performed': []
+        }
+        
+        # Run cookie-specific validation
+        cookie_validation = self.validate_cookie_configuration()
+        validation_results['warnings'].extend(cookie_validation['warnings'])
+        validation_results['errors'].extend(cookie_validation['errors'])
+        validation_results['recommendations'].extend(cookie_validation['recommendations'])
+        validation_results['checks_performed'].append('cookie_configuration')
+        
+        if not cookie_validation['valid']:
+            validation_results['valid'] = False
+        
+        # Environment variable presence checks
+        required_env_vars = []
+        optional_env_vars = []
+        
+        if self.environment == 'aws':
+            required_env_vars.extend([
+                'DATABASE_URL', 'REDIS_URL', 'AWS_REGION'
+            ])
+            
+            if hasattr(self, 'cookie_s3_bucket') and self.cookie_s3_bucket:
+                required_env_vars.append('COOKIE_S3_BUCKET')
+        
+        # Check required environment variables
+        missing_required = []
+        for var in required_env_vars:
+            if not os.getenv(var):
+                missing_required.append(var)
+        
+        if missing_required:
+            validation_results['errors'].extend([
+                f"Required environment variable not set: {var}" for var in missing_required
+            ])
+            validation_results['valid'] = False
+        
+        validation_results['checks_performed'].append('environment_variables')
+        
+        # Security checks
+        security_issues = []
+        
+        if self.debug and self.environment == 'aws':
+            security_issues.append("Debug mode enabled in AWS environment")
+        
+        if self.secret_key == "your-secret-key-here-change-in-production":
+            security_issues.append("Default secret key is still in use")
+        
+        if self.cookie_debug_logging and self.environment == 'aws':
+            security_issues.append("Cookie debug logging enabled in production")
+        
+        if security_issues:
+            validation_results['warnings'].extend([
+                f"Security concern: {issue}" for issue in security_issues
+            ])
+        
+        validation_results['checks_performed'].append('security_validation')
+        
+        # Performance checks
+        performance_recommendations = []
+        
+        if self.max_concurrent_downloads > 10:
+            performance_recommendations.append(
+                "High concurrent download limit may impact system performance"
+            )
+        
+        if self.cookie_cache_ttl_minutes > 120:
+            performance_recommendations.append(
+                "Long cookie cache TTL may impact security"
+            )
+        
+        validation_results['recommendations'].extend(performance_recommendations)
+        validation_results['checks_performed'].append('performance_validation')
+        
+        return validation_results
+    
     model_config = SettingsConfigDict(env_file=".env")
 
 
@@ -225,13 +398,14 @@ def validate_and_log_configuration(settings: Settings, logger: Optional[logging.
     if logger is None:
         logger = logging.getLogger(__name__)
     
-    validation_results = settings.validate_cookie_configuration()
+    # Run comprehensive validation
+    validation_results = settings.validate_all_settings()
     
     # Log validation results
     if validation_results['valid']:
-        logger.info("Cookie configuration validation passed")
+        logger.info(f"Configuration validation passed ({len(validation_results['checks_performed'])} checks)")
     else:
-        logger.error("Cookie configuration validation failed")
+        logger.error("Configuration validation failed")
         for error in validation_results['errors']:
             logger.error(f"Configuration error: {error}")
     
@@ -243,23 +417,24 @@ def validate_and_log_configuration(settings: Settings, logger: Optional[logging.
     for recommendation in validation_results['recommendations']:
         logger.info(f"Configuration recommendation: {recommendation}")
     
-    # Log cookie configuration summary (without sensitive data)
-    cookie_config_summary = {
+    # Log configuration summary (without sensitive data)
+    config_summary = {
+        'environment': settings.environment,
+        'debug': settings.debug,
         'cookies_enabled': settings.cookie_s3_bucket is not None,
         'validation_enabled': settings.cookie_validation_enabled,
         'integrity_checks_enabled': settings.cookie_integrity_checks_enabled,
         'refresh_interval_minutes': settings.cookie_refresh_interval,
         'cache_ttl_minutes': settings.cookie_cache_ttl_minutes,
         'rate_limit_requests': settings.cookie_rate_limit_requests,
-        'rate_limit_window_seconds': settings.cookie_rate_limit_window,
         'alert_threshold': settings.cookie_alert_threshold,
-        'debug_logging': settings.cookie_debug_logging
+        'checks_performed': validation_results['checks_performed']
     }
     
-    if settings.cookie_debug_logging:
-        logger.debug(f"Cookie configuration: {cookie_config_summary}")
+    if settings.cookie_debug_logging or settings.debug:
+        logger.debug(f"Configuration summary: {config_summary}")
     else:
-        logger.info(f"Cookie configuration initialized: {cookie_config_summary}")
+        logger.info(f"Configuration initialized: {config_summary}")
     
     return validation_results['valid']
 
