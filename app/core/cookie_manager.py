@@ -17,6 +17,7 @@ import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
+from collections import defaultdict, deque
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -42,6 +43,16 @@ class CookieExpiredError(Exception):
 
 class CookieDownloadError(Exception):
     """Exception raised when cookie download from S3 fails."""
+    pass
+
+
+class CookieRateLimitError(Exception):
+    """Exception raised when cookie access rate limit is exceeded."""
+    pass
+
+
+class CookieIntegrityError(Exception):
+    """Exception raised when cookie integrity validation fails."""
     pass
 
 
@@ -95,6 +106,15 @@ class CookieManager:
         self.validation_enabled = settings.cookie_validation_enabled
         self.backup_count = settings.cookie_backup_count
         
+        # Rate limiting for cookie access
+        self.rate_limit_window = 60  # 1 minute window
+        self.rate_limit_requests = 10  # Max 10 requests per minute per IP/session
+        self._rate_limit_tracker: Dict[str, deque] = defaultdict(deque)
+        
+        # Cookie integrity tracking
+        self._cookie_hashes: Dict[str, str] = {}  # Track cookie file hashes
+        self._integrity_checks_enabled = True
+        
         logger.info(
             f"CookieManager initialized: bucket={self.bucket_name}, "
             f"region={self.aws_region}, encryption_enabled=True"
@@ -125,9 +145,12 @@ class CookieManager:
             logger.error(f"AWS credentials not configured: {e}")
             raise CookieDownloadError(f"AWS credentials not configured: {e}")
     
-    async def get_active_cookies(self) -> str:
+    async def get_active_cookies(self, identifier: str = "global") -> str:
         """
         Get active cookies as temporary file path for yt-dlp.
+        
+        Args:
+            identifier: Unique identifier for rate limiting (IP, session, etc.)
         
         Returns:
             str: Path to temporary cookie file
@@ -136,8 +159,13 @@ class CookieManager:
             CookieDownloadError: If cookie download fails
             CookieValidationError: If cookies are invalid
             CookieExpiredError: If cookies have expired
+            CookieRateLimitError: If rate limit is exceeded
+            CookieIntegrityError: If cookie integrity validation fails
         """
         try:
+            # Check rate limit first
+            self._check_rate_limit(identifier)
+            
             # Check cache first
             if self._is_cache_valid('active'):
                 logger.debug("Using cached active cookies")
@@ -146,6 +174,9 @@ class CookieManager:
                 # Download from S3
                 logger.info("Downloading active cookies from S3")
                 cookies_content = await self._download_cookie_file(self.active_cookie_key)
+                
+                # Validate cookie integrity
+                self._validate_cookie_integrity(cookies_content, 'active')
                 
                 # Validate cookies if enabled
                 if self.validation_enabled:
@@ -160,26 +191,37 @@ class CookieManager:
             logger.info(f"Active cookies prepared: {temp_file_path}")
             return temp_file_path
             
+        except (CookieRateLimitError, CookieIntegrityError):
+            # Don't retry for rate limit or integrity errors
+            raise
         except Exception as e:
             logger.error(f"Failed to get active cookies: {e}")
             # Try backup cookies as fallback
             try:
-                return await self.get_backup_cookies()
+                return await self.get_backup_cookies(identifier)
             except Exception as backup_error:
                 logger.error(f"Backup cookies also failed: {backup_error}")
                 raise CookieDownloadError(f"Both active and backup cookies failed: {e}")
     
-    async def get_backup_cookies(self) -> str:
+    async def get_backup_cookies(self, identifier: str = "global") -> str:
         """
         Get backup cookies as temporary file path for yt-dlp.
+        
+        Args:
+            identifier: Unique identifier for rate limiting (IP, session, etc.)
         
         Returns:
             str: Path to temporary cookie file
             
         Raises:
             CookieDownloadError: If backup cookie download fails
+            CookieRateLimitError: If rate limit is exceeded
+            CookieIntegrityError: If cookie integrity validation fails
         """
         try:
+            # Check rate limit (using a separate limit for backup cookies)
+            self._check_rate_limit(f"{identifier}_backup")
+            
             # Check cache first
             if self._is_cache_valid('backup'):
                 logger.debug("Using cached backup cookies")
@@ -188,6 +230,9 @@ class CookieManager:
                 # Download from S3
                 logger.info("Downloading backup cookies from S3")
                 cookies_content = await self._download_cookie_file(self.backup_cookie_key)
+                
+                # Validate cookie integrity
+                self._validate_cookie_integrity(cookies_content, 'backup')
                 
                 # Cache encrypted cookies
                 self._encrypt_to_cache('backup', cookies_content)
@@ -507,6 +552,135 @@ class CookieManager:
         if encrypted_content:
             return self._cipher_suite.decrypt(encrypted_content).decode('utf-8')
         raise KeyError(f"Cache key not found: {cache_key}")
+    
+    def _check_rate_limit(self, identifier: str = "global") -> bool:
+        """
+        Check if rate limit has been exceeded for cookie access.
+        
+        Args:
+            identifier: Unique identifier for rate limiting (IP, session, etc.)
+            
+        Returns:
+            bool: True if within rate limit, False if exceeded
+            
+        Raises:
+            CookieRateLimitError: If rate limit is exceeded
+        """
+        current_time = time.time()
+        window_start = current_time - self.rate_limit_window
+        
+        # Clean old entries outside the time window
+        request_times = self._rate_limit_tracker[identifier]
+        while request_times and request_times[0] < window_start:
+            request_times.popleft()
+        
+        # Check if we're within rate limit
+        if len(request_times) >= self.rate_limit_requests:
+            logger.warning(
+                f"Rate limit exceeded for {identifier}: "
+                f"{len(request_times)} requests in {self.rate_limit_window}s window"
+            )
+            raise CookieRateLimitError(
+                f"Rate limit exceeded: {len(request_times)}/{self.rate_limit_requests} "
+                f"requests per {self.rate_limit_window}s"
+            )
+        
+        # Add current request
+        request_times.append(current_time)
+        return True
+    
+    def _validate_cookie_integrity(self, cookies_content: str, cookie_type: str) -> bool:
+        """
+        Validate cookie file integrity using hash verification.
+        
+        Args:
+            cookies_content: Cookie file content to validate
+            cookie_type: Type of cookie file (active/backup)
+            
+        Returns:
+            bool: True if integrity is valid
+            
+        Raises:
+            CookieIntegrityError: If integrity validation fails
+        """
+        if not self._integrity_checks_enabled:
+            return True
+        
+        try:
+            # Calculate current hash
+            current_hash = hashlib.sha256(cookies_content.encode('utf-8')).hexdigest()
+            stored_hash = self._cookie_hashes.get(cookie_type)
+            
+            if stored_hash is None:
+                # First time seeing this cookie type, store the hash
+                self._cookie_hashes[cookie_type] = current_hash
+                logger.info(f"Stored initial integrity hash for {cookie_type} cookies")
+                return True
+            
+            if current_hash != stored_hash:
+                logger.error(
+                    f"Cookie integrity validation failed for {cookie_type}: "
+                    f"hash mismatch (expected: {stored_hash[:16]}..., "
+                    f"got: {current_hash[:16]}...)"
+                )
+                raise CookieIntegrityError(
+                    f"Cookie file integrity validation failed for {cookie_type} cookies"
+                )
+            
+            logger.debug(f"Cookie integrity validated for {cookie_type} cookies")
+            return True
+            
+        except CookieIntegrityError:
+            raise
+        except Exception as e:
+            logger.error(f"Error during cookie integrity validation: {e}")
+            # In case of validation errors, we may want to proceed with caution
+            # but log the issue for investigation
+            return True
+    
+    def update_cookie_integrity_hash(self, cookie_type: str, cookies_content: str) -> None:
+        """
+        Update the stored integrity hash for a cookie type.
+        
+        This should be called when cookies are intentionally updated/rotated.
+        
+        Args:
+            cookie_type: Type of cookie file (active/backup)
+            cookies_content: New cookie file content
+        """
+        new_hash = hashlib.sha256(cookies_content.encode('utf-8')).hexdigest()
+        self._cookie_hashes[cookie_type] = new_hash
+        logger.info(f"Updated integrity hash for {cookie_type} cookies")
+    
+    async def get_rate_limit_status(self) -> Dict[str, Any]:
+        """
+        Get current rate limit status for monitoring.
+        
+        Returns:
+            Dict[str, Any]: Rate limit status information
+        """
+        current_time = time.time()
+        window_start = current_time - self.rate_limit_window
+        
+        status = {
+            'rate_limit_window_seconds': self.rate_limit_window,
+            'max_requests_per_window': self.rate_limit_requests,
+            'active_identifiers': len(self._rate_limit_tracker),
+            'identifiers': {}
+        }
+        
+        for identifier, request_times in self._rate_limit_tracker.items():
+            # Clean old entries
+            while request_times and request_times[0] < window_start:
+                request_times.popleft()
+            
+            status['identifiers'][identifier] = {
+                'requests_in_window': len(request_times),
+                'remaining_requests': max(0, self.rate_limit_requests - len(request_times)),
+                'window_resets_in': max(0, int(request_times[0] + self.rate_limit_window - current_time)) if request_times else 0
+            }
+        
+        return status
     
     def _is_cache_valid(self, cache_key: str) -> bool:
         """Check if cached content is still valid."""
