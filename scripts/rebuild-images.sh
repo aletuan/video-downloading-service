@@ -52,7 +52,7 @@ echo "Pushing images to ECR..."
 docker push "${ECR_REGISTRY}.dkr.ecr.${AWS_REGION}.amazonaws.com/youtube-downloader/app:latest"
 docker push "${ECR_REGISTRY}.dkr.ecr.${AWS_REGION}.amazonaws.com/youtube-downloader/worker:latest"
 
-echo "Done! Images rebuilt for correct architecture and pushed to ECR."
+echo "Images rebuilt for correct architecture and pushed to ECR successfully."
 echo "Next step: Force new ECS deployment to use updated images"
 
 if [[ -n "$CLUSTER_NAME" && -n "$APP_SERVICE_NAME" && -n "$WORKER_SERVICE_NAME" ]]; then
