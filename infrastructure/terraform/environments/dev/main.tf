@@ -233,30 +233,57 @@ resource "null_resource" "database_migration" {
     command = <<-EOF
       set -e
       
-      echo "Starting database migration via ECS task..."
+      # Colors for output formatting (matching deployment script style)
+      RED='\033[0;31m'
+      GREEN='\033[0;32m'
+      YELLOW='\033[1;33m'
+      BLUE='\033[0;34m'
+      NC='\033[0m'
+      
+      # Utility functions (matching deployment script style)
+      log() {
+          echo -e "$${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] $$1$${NC}"
+      }
+      
+      success() {
+          echo -e "$${GREEN}✅ $$1$${NC}"
+      }
+      
+      warning() {
+          echo -e "$${YELLOW}⚠️  $$1$${NC}"
+      }
+      
+      error() {
+          echo -e "$${RED}❌ $$1$${NC}"
+      }
+      
+      log "🗄️  Initiating database migration process..."
       
       # Get cluster name and task definition
       CLUSTER_NAME="${module.compute.cluster_name}"
+      log "Using ECS cluster: $${CLUSTER_NAME}"
       
       # Get the latest task definition ARN
+      log "Retrieving task definition for migration..."
       TASK_DEF_ARN=$(aws ecs describe-task-definition \
         --task-definition "${var.project_name}-${local.environment}-app" \
         --query 'taskDefinition.taskDefinitionArn' \
-        --output text)
+        --output text 2>/dev/null)
       
       if [[ -z "$TASK_DEF_ARN" || "$TASK_DEF_ARN" == "None" ]]; then
-        echo "Error: Could not find task definition"
+        error "Could not find task definition for ${var.project_name}-${local.environment}-app"
         exit 1
       fi
       
-      echo "Using task definition: $TASK_DEF_ARN"
+      log "Task definition found: $$(basename $${TASK_DEF_ARN})"
       
       # Get subnet IDs for network configuration
       SUBNET_IDS='${jsonencode(module.networking.public_subnet_ids)}'
       SUBNET_LIST=$(echo $SUBNET_IDS | jq -r '.[]' | tr '\n' ',' | sed 's/,$//')
+      log "Network configuration prepared with $$(echo $SUBNET_LIST | tr ',' '\n' | wc -l | tr -d ' ') subnets"
       
       # First attempt: Run Alembic migration
-      echo "Attempting Alembic migration..."
+      log "🔄 Attempting Alembic migration (preferred method)..."
       MIGRATION_TASK=$(aws ecs run-task \
         --cluster "$CLUSTER_NAME" \
         --task-definition "$TASK_DEF_ARN" \
@@ -267,31 +294,37 @@ resource "null_resource" "database_migration" {
         --output text 2>/dev/null || echo "FAILED")
       
       if [[ "$MIGRATION_TASK" != "FAILED" && "$MIGRATION_TASK" != "None" && -n "$MIGRATION_TASK" ]]; then
-        echo "Migration task started: $MIGRATION_TASK"
-        echo "Waiting for migration to complete..."
+        log "Alembic migration task started: $$(basename $${MIGRATION_TASK})"
+        log "⏳ Waiting for migration to complete (timeout: 5 minutes)..."
         
         # Wait for task to complete (with timeout)
-        aws ecs wait tasks-stopped --cluster "$CLUSTER_NAME" --tasks "$MIGRATION_TASK" --cli-read-timeout 300 || echo "Migration task timeout or failed"
-        
-        # Check exit code
-        EXIT_CODE=$(aws ecs describe-tasks \
-          --cluster "$CLUSTER_NAME" \
-          --tasks "$MIGRATION_TASK" \
-          --query 'tasks[0].containers[0].exitCode' \
-          --output text 2>/dev/null || echo "1")
-        
-        if [[ "$EXIT_CODE" == "0" ]]; then
-          echo "✅ Alembic migration completed successfully"
-          exit 0
+        if aws ecs wait tasks-stopped --cluster "$CLUSTER_NAME" --tasks "$MIGRATION_TASK" --cli-read-timeout 300; then
+          # Check exit code
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster "$CLUSTER_NAME" \
+            --tasks "$MIGRATION_TASK" \
+            --query 'tasks[0].containers[0].exitCode' \
+            --output text 2>/dev/null || echo "1")
+          
+          if [[ "$EXIT_CODE" == "0" ]]; then
+            success "Alembic migration completed successfully"
+            success "Database schema is up to date"
+            exit 0
+          else
+            warning "Alembic migration failed (exit code: $${EXIT_CODE})"
+            warning "Attempting fallback method..."
+          fi
         else
-          echo "⚠️  Alembic migration failed, trying direct table creation..."
+          warning "Alembic migration task timed out or failed"
+          warning "Attempting fallback method..."
         fi
       else
-        echo "⚠️  Could not start Alembic migration task, trying direct table creation..."
+        warning "Could not start Alembic migration task"
+        warning "Attempting fallback method..."
       fi
       
       # Fallback: Direct table creation using Python script
-      echo "Creating tables directly using asyncpg..."
+      log "🔄 Creating database tables directly (fallback method)..."
       
       # Create Python script for table creation
       PYTHON_SCRIPT='
@@ -304,10 +337,10 @@ async def create_tables():
     try:
         database_url = os.getenv("DATABASE_URL")
         if not database_url:
-            print("Error: DATABASE_URL environment variable not found")
+            print("❌ DATABASE_URL environment variable not found")
             sys.exit(1)
             
-        print(f"Connecting to database...")
+        print("🔗 Connecting to PostgreSQL database...")
         conn = await asyncpg.connect(database_url)
         
         # Create api_keys table
@@ -360,16 +393,16 @@ async def create_tables():
         print("✅ alembic_version table created/verified")
         
         await conn.close()
-        print("✅ All database tables created successfully")
+        print("✅ Database migration completed successfully")
         
     except Exception as e:
-        print(f"❌ Error creating tables: {str(e)}")
+        print(f"❌ Database migration failed: {str(e)}")
         sys.exit(1)
 
 asyncio.run(create_tables())
 '
       
-      # Run table creation task
+      log "Starting table creation task..."
       TABLE_TASK=$(aws ecs run-task \
         --cluster "$CLUSTER_NAME" \
         --task-definition "$TASK_DEF_ARN" \
@@ -380,26 +413,33 @@ asyncio.run(create_tables())
         --output text 2>/dev/null || echo "FAILED")
       
       if [[ "$TABLE_TASK" != "FAILED" && "$TABLE_TASK" != "None" && -n "$TABLE_TASK" ]]; then
-        echo "Table creation task started: $TABLE_TASK"
-        echo "Waiting for table creation to complete..."
+        log "Table creation task started: $$(basename $${TABLE_TASK})"
+        log "⏳ Waiting for table creation to complete (timeout: 5 minutes)..."
         
-        aws ecs wait tasks-stopped --cluster "$CLUSTER_NAME" --tasks "$TABLE_TASK" --cli-read-timeout 300 || echo "Table creation timeout"
-        
-        # Check exit code
-        EXIT_CODE=$(aws ecs describe-tasks \
-          --cluster "$CLUSTER_NAME" \
-          --tasks "$TABLE_TASK" \
-          --query 'tasks[0].containers[0].exitCode' \
-          --output text 2>/dev/null || echo "1")
-        
-        if [[ "$EXIT_CODE" == "0" ]]; then
-          echo "✅ Database tables created successfully via direct method"
+        if aws ecs wait tasks-stopped --cluster "$CLUSTER_NAME" --tasks "$TABLE_TASK" --cli-read-timeout 300; then
+          # Check exit code
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster "$CLUSTER_NAME" \
+            --tasks "$TABLE_TASK" \
+            --query 'tasks[0].containers[0].exitCode' \
+            --output text 2>/dev/null || echo "1")
+          
+          if [[ "$EXIT_CODE" == "0" ]]; then
+            success "Database tables created successfully (fallback method)"
+            success "Tables: api_keys, download_jobs, alembic_version"
+          else
+            error "Table creation failed (exit code: $${EXIT_CODE})"
+            error "Database migration could not be completed"
+            exit 1
+          fi
         else
-          echo "❌ Table creation failed"
+          error "Table creation task timed out"
+          error "Database migration could not be completed"
           exit 1
         fi
       else
-        echo "❌ Could not start table creation task"
+        error "Could not start table creation task"
+        error "Database migration failed completely"
         exit 1
       fi
     EOF

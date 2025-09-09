@@ -103,19 +103,19 @@ deploy_module() {
     # Plan and Apply
     if terraform plan -target="module.$module" -out="/tmp/terraform-$module.plan" &>/dev/null; then
         if terraform apply "/tmp/terraform-$module.plan"; then
-            success "✅ Phase $phase COMPLETED"
+            success "Phase $phase COMPLETED"
             rm -f "/tmp/terraform-$module.plan"
             return 0
         fi
     fi
     
-    error "❌ Phase $phase FAILED"
+    error "Phase $phase FAILED"
     return 1
 }
 
 # Deploy all infrastructure phases
 deploy_all_phases() {
-    echo "⚡ STARTING DEPLOYMENT EXECUTION..."
+    echo "STARTING DEPLOYMENT EXECUTION..."
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     # Phase 6A: Core Infrastructure Foundation
@@ -145,7 +145,7 @@ deploy_all_phases() {
     
     # Phase 6G: Application Deployment
     echo ""
-    log "📦 Phase 6G: Application Deployment"
+    log "Phase 6G: Application Deployment"
     
     # ECR Setup
     if ! aws ecr describe-repositories --repository-names youtube-downloader/app youtube-downloader/worker &>/dev/null; then
@@ -177,7 +177,7 @@ deploy_all_phases() {
     
     # Phase 6H: Database Migration
     echo ""
-    log "🗄️  Phase 6H: Database Migration"
+    log "Phase 6H: Database Migration"
     cd "$TERRAFORM_DIR"
     
     if terraform apply -target=null_resource.database_migration -auto-approve; then
@@ -188,12 +188,12 @@ deploy_all_phases() {
     
     # Final Health Check
     echo ""
-    log "🔍 Final Health Verification"
+    log "Final Health Verification"
     ALB_ENDPOINT=$(terraform output -raw alb_endpoint 2>/dev/null)
     if [[ -n "$ALB_ENDPOINT" ]]; then
         HEALTH_RESPONSE=$(curl -s "$ALB_ENDPOINT/health" 2>/dev/null || echo "failed")
         if [[ "$HEALTH_RESPONSE" == *"healthy"* ]]; then
-            success "Application health check: PASSED ✅"
+            success "Application health check: PASSED"
         else
             warning "Application health check: FAILED or starting up"
             log "Manual test: curl $ALB_ENDPOINT/health"
@@ -205,8 +205,8 @@ deploy_all_phases() {
     
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    success "🎉 DEPLOYMENT COMPLETED SUCCESSFULLY!"
-    success "✅ All 8 phases deployed (6A-6H)"
+    success "DEPLOYMENT COMPLETED SUCCESSFULLY!"
+    success "All 8 phases deployed (6A-6H)"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
@@ -217,39 +217,39 @@ show_deployment_summary() {
     cd "$TERRAFORM_DIR"
     
     echo ""
-    log "🏗️  Infrastructure Overview:"
+    log "Infrastructure Overview:"
     terraform output | grep -E "(alb_endpoint|database_endpoint|redis_endpoint|s3_bucket_name|ecs_cluster_name)" || true
     
     echo ""
-    log "💰 Cost Estimation:"
+    log "Cost Estimation:"
     terraform output | grep -E "(estimated_monthly_cost|total_estimated)" || true
     
     echo ""
-    log "✅ Phase 6G Status:"
+    log "Phase 6G Status:"
     terraform output | grep -E "(app_service_name|worker_service_name)" || true
     
     # Check ALB health
     ALB_ENDPOINT=$(terraform output -raw alb_endpoint 2>/dev/null)
     if [[ -n "$ALB_ENDPOINT" ]]; then
-        echo "🌐 Health Check: $ALB_ENDPOINT/health"
+        echo "Health Check: $ALB_ENDPOINT/health"
         HEALTH_STATUS=$(curl -s "$ALB_ENDPOINT/health" 2>/dev/null || echo "Not Ready")
         echo "   Status: $HEALTH_STATUS"
     fi
     
     echo ""
-    log "📋 Available Actions:"
+    log "Available Actions:"
     echo "1. Test application: curl $ALB_ENDPOINT/health"
     echo "2. Rebuild images: ./scripts/rebuild-images.sh" 
     echo "3. View ECS logs: aws logs get-log-events --log-group-name /ecs/youtube-downloader-dev-app"
     echo "4. Rollback all: ./scripts/deploy-infrastructure.sh rollback"
     echo ""
-    log "📁 Full outputs saved to: /tmp/terraform-final-outputs.txt"
-    log "📁 Deployment log saved to: $LOG_FILE"
+    log "Full outputs saved to: /tmp/terraform-final-outputs.txt"
+    log "Deployment log saved to: $LOG_FILE"
 }
 
 # Rollback function
 rollback_deployment() {
-    warning "🚨 ROLLBACK REQUESTED"
+    warning "ROLLBACK REQUESTED"
     log "This will destroy ALL infrastructure resources AND ECR repositories"
     log "⚠️  This includes:"
     log "   - All Terraform resources (VPC, RDS, ECS, ALB, etc.)"
@@ -272,7 +272,7 @@ rollback_deployment() {
                     if [[ "$repo" == youtube-downloader/* ]]; then
                         log "Deleting ECR repository: $repo"
                         if aws ecr delete-repository --repository-name "$repo" --force --region us-east-1; then
-                            success "✅ ECR repository '$repo' deleted successfully"
+                            success "ECR repository '$repo' deleted successfully"
                         else
                             warning "Failed to delete ECR repository '$repo'"
                         fi
@@ -290,14 +290,14 @@ rollback_deployment() {
         cd "$TERRAFORM_DIR"
         
         if terraform destroy -auto-approve; then
-            success "✅ All Terraform resources destroyed successfully"
+            success "All Terraform resources destroyed successfully"
             
             # Final verification
             log "Performing final cleanup verification..."
             
             # Check terraform state
             if [ "$(terraform state list | wc -l)" -eq 0 ]; then
-                success "✅ Terraform state is clean"
+                success "Terraform state is clean"
             else
                 warning "⚠️  Some resources may remain in terraform state"
             fi
@@ -305,17 +305,17 @@ rollback_deployment() {
             # Check ECR repositories
             ECR_CHECK=$(aws ecr describe-repositories --region us-east-1 --query 'repositories[].repositoryName' --output text 2>/dev/null || echo "")
             if [[ -z "$ECR_CHECK" ]]; then
-                success "✅ All ECR repositories cleaned up"
+                success "All ECR repositories cleaned up"
             else
                 warning "⚠️  Some ECR repositories may still exist: $ECR_CHECK"
             fi
             
-            success "🎉 Complete infrastructure rollback finished!"
-            log "💰 Cost savings: All recurring AWS charges eliminated"
+            success "Complete infrastructure rollback finished!"
+            log "Cost savings: All recurring AWS charges eliminated"
             
         else
             error "❌ Terraform rollback failed - manual cleanup may be required"
-            log "💡 You may need to manually delete ECR repositories:"
+            log "You may need to manually delete ECR repositories:"
             log "   aws ecr describe-repositories --region us-east-1"
             log "   aws ecr delete-repository --repository-name REPO_NAME --force"
         fi
@@ -328,10 +328,10 @@ rollback_deployment() {
 show_deployment_overview() {
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "🚀 AWS INFRASTRUCTURE DEPLOYMENT - YOUTUBE DOWNLOADER SERVICE"
+    echo "AWS INFRASTRUCTURE DEPLOYMENT - YOUTUBE DOWNLOADER SERVICE"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    echo "📋 DEPLOYMENT WORKFLOW (8 Phases):"
+    echo "DEPLOYMENT WORKFLOW (8 Phases):"
     echo "   Phase 6A: Core Infrastructure    → VPC, Subnets, Security Groups"
     echo "   Phase 6B: Storage Layer          → S3 Bucket with Lifecycle"  
     echo "   Phase 6C: Database & Cache       → PostgreSQL RDS + ElastiCache Redis"
@@ -341,9 +341,9 @@ show_deployment_overview() {
     echo "   Phase 6G: Application Deploy     → Docker Images + ECS Services"
     echo "   Phase 6H: Database Migration     → Create Tables (api_keys, download_jobs)"
     echo ""
-    echo "🔧 ESTIMATED TIME: 15-20 minutes"
-    echo "💰 ESTIMATED COST: ~$50-80/month (dev environment)"
-    echo "🌍 REGION: us-east-1"
+    echo "ESTIMATED TIME: 15-20 minutes"
+    echo "ESTIMATED COST: ~$50-80/month (dev environment)"
+    echo "REGION: us-east-1"
     echo ""
     echo "⚠️  PREREQUISITES:"
     echo "   ✓ AWS CLI configured with valid credentials"
@@ -351,7 +351,7 @@ show_deployment_overview() {
     echo "   ✓ Docker installed (for image building)"
     echo "   ✓ jq installed (for JSON processing)"
     echo ""
-    echo "🎛️  AVAILABLE COMMANDS:"
+    echo "AVAILABLE COMMANDS:"
     echo "   ./deploy-infrastructure.sh          → Full deployment (default)"
     echo "   ./deploy-infrastructure.sh plan     → Show deployment plan only"  
     echo "   ./deploy-infrastructure.sh init     → Initialize Terraform only"
@@ -362,7 +362,7 @@ show_deployment_overview() {
     
     # Prompt for confirmation unless in non-interactive mode
     if [[ "${1:-}" != "auto" ]]; then
-        read -p "🤔 Do you want to proceed with the deployment? (y/N): " confirm
+        read -p "Do you want to proceed with the deployment? (y/N): " confirm
         if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
             echo "Deployment cancelled by user."
             exit 0
