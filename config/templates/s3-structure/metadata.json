@@ -1,0 +1,110 @@
+{
+  "cookie_metadata": {
+    "version": "1.0",
+    "schema": "youtube-downloader-cookie-metadata",
+    "last_updated": "2025-09-09T00:00:00Z",
+    "updated_by": "admin"
+  },
+  "active_cookies": {
+    "filename": "youtube-cookies-active.txt",
+    "created_at": "2025-09-09T00:00:00Z",
+    "expires_at": "2025-10-09T00:00:00Z",
+    "status": "active",
+    "source": "browser_export",
+    "browser": "chrome",
+    "browser_version": "120.0.0.0",
+    "domain_count": 2,
+    "session_cookies": 1,
+    "persistent_cookies": 1,
+    "validation": {
+      "last_tested": "2025-09-09T00:00:00Z",
+      "test_result": "success",
+      "test_url": "https://www.youtube.com/watch?v=test",
+      "next_test_due": "2025-09-16T00:00:00Z"
+    },
+    "usage_stats": {
+      "first_used": "2025-09-09T00:00:00Z",
+      "last_used": "2025-09-09T00:00:00Z",
+      "success_count": 0,
+      "failure_count": 0,
+      "success_rate": 0.0
+    }
+  },
+  "backup_cookies": {
+    "filename": "youtube-cookies-backup.txt",
+    "created_at": "2025-09-02T00:00:00Z",
+    "expires_at": "2025-10-02T00:00:00Z",
+    "status": "backup",
+    "source": "previous_active",
+    "browser": "chrome",
+    "browser_version": "119.0.0.0",
+    "domain_count": 2,
+    "session_cookies": 1,
+    "persistent_cookies": 1,
+    "validation": {
+      "last_tested": "2025-09-02T00:00:00Z",
+      "test_result": "success",
+      "test_url": "https://www.youtube.com/watch?v=test",
+      "next_test_due": "2025-09-09T00:00:00Z"
+    },
+    "usage_stats": {
+      "first_used": "2025-08-26T00:00:00Z",
+      "last_used": "2025-09-02T00:00:00Z",
+      "success_count": 150,
+      "failure_count": 5,
+      "success_rate": 96.8
+    }
+  },
+  "rotation_schedule": {
+    "rotation_interval_days": 30,
+    "warning_days_before_expiry": 7,
+    "next_rotation_due": "2025-10-02T00:00:00Z",
+    "auto_rotation_enabled": false,
+    "backup_retention_count": 2
+  },
+  "security": {
+    "encryption_enabled": true,
+    "access_logged": true,
+    "last_access": "2025-09-09T00:00:00Z",
+    "access_count": 1,
+    "suspicious_activity": false,
+    "ip_whitelist_enabled": false,
+    "allowed_services": ["ecs-youtube-downloader"]
+  },
+  "alerts": {
+    "expiry_warning_sent": false,
+    "failure_threshold": 5,
+    "consecutive_failures": 0,
+    "last_alert_sent": null,
+    "alert_recipients": ["admin@example.com"],
+    "alert_enabled": true
+  },
+  "compliance": {
+    "data_classification": "sensitive",
+    "retention_policy": "90_days",
+    "audit_trail_enabled": true,
+    "last_audit": "2025-09-09T00:00:00Z",
+    "compliance_status": "compliant"
+  },
+  "file_naming_convention": {
+    "active_cookie_pattern": "youtube-cookies-active.txt",
+    "backup_cookie_pattern": "youtube-cookies-backup-{date}.txt",
+    "metadata_pattern": "metadata.json",
+    "archive_pattern": "archive/youtube-cookies-{date}-{hash}.txt",
+    "timestamp_format": "YYYY-MM-DD",
+    "hash_algorithm": "sha256"
+  },
+  "directory_structure": {
+    "root_path": "cookies/",
+    "active_path": "cookies/youtube-cookies-active.txt",
+    "backup_path": "cookies/youtube-cookies-backup.txt", 
+    "metadata_path": "cookies/metadata.json",
+    "archive_path": "cookies/archive/",
+    "temp_path": "cookies/temp/",
+    "permissions": {
+      "read_roles": ["ecs-task-role"],
+      "write_roles": ["admin-role"],
+      "public_access": false
+    }
+  }
+}
