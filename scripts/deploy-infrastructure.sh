@@ -19,6 +19,12 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TERRAFORM_DIR="${PROJECT_ROOT}/infrastructure/terraform/environments/dev"
 LOG_FILE="/tmp/terraform-deployment.log"
 
+# Advanced rollback configuration
+ROLLBACK_COMPONENT="all"
+DRY_RUN=false
+FORCE=false
+TARGET_VERSION=""
+
 # Utility functions
 log() {
     echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}" | tee -a "$LOG_FILE"
@@ -34,6 +40,58 @@ warning() {
 
 error() {
     echo -e "${RED}❌ $1${NC}" | tee -a "$LOG_FILE"
+}
+
+# Enhanced utility functions for rollback
+confirm() {
+    if [[ "$FORCE" == "true" ]]; then
+        return 0
+    fi
+    
+    local message="$1"
+    echo -e "${YELLOW}$message${NC}"
+    read -p "Continue? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        error "Operation cancelled by user"
+        exit 1
+    fi
+}
+
+show_rollback_help() {
+    cat << EOF
+Enhanced Rollback Options for YouTube Download Service
+
+USAGE:
+    $0 rollback [OPTIONS]
+
+OPTIONS:
+    --component COMP     Component to rollback (all, app, infrastructure, cookies)
+    --version VERSION    Target version to rollback to
+    --dry-run           Show what would be done without executing
+    --force             Force rollback without confirmations
+    --help              Show this help message
+
+EXAMPLES:
+    # Full rollback (existing behavior)
+    $0 rollback
+
+    # Rollback only application containers
+    $0 rollback --component app
+
+    # Rollback only cookie management components
+    $0 rollback --component cookies --version v1.2.0
+
+    # Dry run of full rollback
+    $0 rollback --dry-run
+
+COMPONENTS:
+    all              Rollback entire application and infrastructure
+    app              Rollback application containers only
+    infrastructure   Rollback Terraform infrastructure only
+    cookies          Rollback cookie management components only
+
+EOF
 }
 
 # Extract values from terraform outputs
@@ -247,8 +305,225 @@ show_deployment_summary() {
     log "Deployment log saved to: $LOG_FILE"
 }
 
-# Rollback function
-rollback_deployment() {
+# Advanced rollback functions
+rollback_application() {
+    log "Starting application rollback..."
+    
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would rollback ECS services to previous versions"
+        return 0
+    fi
+    
+    confirm "This will rollback application containers. Current sessions may be interrupted."
+    
+    # Get cluster name
+    local cluster_name
+    cluster_name=$(get_terraform_output "ecs_cluster_name")
+    
+    if [[ -z "$cluster_name" ]]; then
+        error "Could not find ECS cluster name from Terraform outputs"
+        return 1
+    fi
+    
+    log "Rolling back services in cluster: $cluster_name"
+    
+    # Rollback app service
+    local app_service_name
+    app_service_name=$(get_terraform_output "app_service_name")
+    
+    if [[ -n "$app_service_name" ]]; then
+        log "Rolling back app service: $app_service_name"
+        
+        # Get previous task definition revision
+        local task_family="youtube-downloader-dev-app"
+        local previous_revision
+        
+        if [[ -n "$TARGET_VERSION" ]]; then
+            previous_revision="$task_family:$TARGET_VERSION"
+        else
+            # Get second most recent revision
+            previous_revision=$(aws ecs list-task-definitions \
+                --family-prefix "$task_family" \
+                --status ACTIVE --sort DESC \
+                --query "taskDefinitionArns[1]" --output text 2>/dev/null || echo "")
+        fi
+        
+        if [[ -n "$previous_revision" && "$previous_revision" != "None" ]]; then
+            log "Rolling back to task definition: $(basename "$previous_revision")"
+            
+            aws ecs update-service \
+                --cluster "$cluster_name" \
+                --service "$app_service_name" \
+                --task-definition "$previous_revision" \
+                --force-new-deployment
+            
+            # Wait for rollback to complete
+            log "Waiting for service rollback to complete..."
+            aws ecs wait services-stable --cluster "$cluster_name" --services "$app_service_name"
+            
+            success "App service rollback completed"
+        else
+            error "Could not find previous task definition for rollback"
+            return 1
+        fi
+    fi
+    
+    # Rollback worker service
+    local worker_service_name
+    worker_service_name=$(get_terraform_output "worker_service_name")
+    
+    if [[ -n "$worker_service_name" ]]; then
+        log "Rolling back worker service: $worker_service_name"
+        
+        local task_family="youtube-downloader-dev-worker"
+        local previous_revision
+        
+        if [[ -n "$TARGET_VERSION" ]]; then
+            previous_revision="$task_family:$TARGET_VERSION"
+        else
+            previous_revision=$(aws ecs list-task-definitions \
+                --family-prefix "$task_family" \
+                --status ACTIVE --sort DESC \
+                --query "taskDefinitionArns[1]" --output text 2>/dev/null || echo "")
+        fi
+        
+        if [[ -n "$previous_revision" && "$previous_revision" != "None" ]]; then
+            aws ecs update-service \
+                --cluster "$cluster_name" \
+                --service "$worker_service_name" \
+                --task-definition "$previous_revision" \
+                --force-new-deployment
+            
+            aws ecs wait services-stable --cluster "$cluster_name" --services "$worker_service_name"
+            success "Worker service rollback completed"
+        fi
+    fi
+    
+    success "Application rollback completed successfully"
+}
+
+rollback_infrastructure() {
+    log "Starting infrastructure rollback..."
+    
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would rollback Terraform infrastructure"
+        return 0
+    fi
+    
+    confirm "This will rollback infrastructure changes. This may affect system availability."
+    
+    # This delegates to the existing full rollback for infrastructure
+    rollback_deployment_full
+}
+
+rollback_cookie_management() {
+    log "Starting cookie management component rollback..."
+    
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "[DRY RUN] Would rollback cookie management configuration"
+        return 0
+    fi
+    
+    confirm "This will rollback cookie management settings and may disable cookie functionality."
+    
+    # Rollback cookie-related Parameter Store values
+    log "Rolling back cookie manager configuration..."
+    
+    local params=(
+        "/youtube-downloader/dev/cookie/encryption-key"
+        "/youtube-downloader/dev/cookie/validation-enabled"
+        "/youtube-downloader/dev/cookie/refresh-interval"
+    )
+    
+    for param in "${params[@]}"; do
+        if aws ssm get-parameter --name "$param-backup" >/dev/null 2>&1; then
+            log "Restoring parameter: $param"
+            
+            local backup_value
+            backup_value=$(aws ssm get-parameter --name "$param-backup" \
+                --with-decryption --query "Parameter.Value" --output text 2>/dev/null || echo "")
+            
+            if [[ -n "$backup_value" ]]; then
+                aws ssm put-parameter --name "$param" \
+                    --value "$backup_value" --type SecureString --overwrite
+            fi
+        else
+            warning "No backup found for parameter: $param"
+        fi
+    done
+    
+    # Handle cookie files in S3 if bucket exists
+    local cookie_bucket
+    cookie_bucket=$(get_terraform_output "secure_config_bucket_name")
+    
+    if [[ -n "$cookie_bucket" ]]; then
+        log "Managing cookie files in S3 bucket: $cookie_bucket"
+        
+        # Move current cookies to backup location
+        aws s3 cp "s3://$cookie_bucket/cookies/youtube-cookies-active.txt" \
+                  "s3://$cookie_bucket/cookies/backups/rollback-$(date +%Y%m%d-%H%M%S).txt" 2>/dev/null || true
+        
+        # Restore from latest good backup if available
+        local latest_backup
+        latest_backup=$(aws s3 ls "s3://$cookie_bucket/cookies/backups/" \
+            --recursive | grep "\.txt$" | tail -n 1 | awk '{print $NF}' || echo "")
+        
+        if [[ -n "$latest_backup" ]]; then
+            log "Restoring from backup: $(basename "$latest_backup")"
+            aws s3 cp "s3://$cookie_bucket/$latest_backup" \
+                      "s3://$cookie_bucket/cookies/youtube-cookies-active.txt"
+        fi
+    fi
+    
+    success "Cookie management rollback completed"
+}
+
+# Enhanced rollback function with component support
+rollback_deployment_enhanced() {
+    local component="${1:-$ROLLBACK_COMPONENT}"
+    
+    log "Enhanced rollback requested - Component: $component"
+    
+    # Show rollback plan
+    if [[ "$DRY_RUN" == "false" ]]; then
+        log "Rollback Plan:"
+        log "  Component: $component"
+        log "  Target Version: ${TARGET_VERSION:-"Previous version"}"
+        log "  Dry Run: $DRY_RUN"
+        echo ""
+    fi
+    
+    # Execute rollback based on component
+    case "$component" in
+        all)
+            rollback_application
+            rollback_infrastructure
+            ;;
+        app)
+            rollback_application
+            ;;
+        infrastructure)
+            rollback_infrastructure
+            ;;
+        cookies)
+            rollback_cookie_management
+            ;;
+        *)
+            error "Invalid component: $component"
+            show_rollback_help
+            exit 1
+            ;;
+    esac
+    
+    if [[ "$DRY_RUN" == "true" ]]; then
+        success "Dry run completed successfully"
+    else
+        success "Enhanced rollback completed successfully"
+    fi
+}
+
+# Original rollback function (renamed for clarity)
+rollback_deployment_full() {
     warning "ROLLBACK REQUESTED"
     log "This will destroy ALL infrastructure resources AND ECR repositories"
     log "⚠️  This includes:"
@@ -352,10 +627,16 @@ show_deployment_overview() {
     echo "   ✓ jq installed (for JSON processing)"
     echo ""
     echo "AVAILABLE COMMANDS:"
-    echo "   ./deploy-infrastructure.sh          → Full deployment (default)"
-    echo "   ./deploy-infrastructure.sh plan     → Show deployment plan only"  
-    echo "   ./deploy-infrastructure.sh init     → Initialize Terraform only"
-    echo "   ./deploy-infrastructure.sh rollback → Destroy all resources"
+    echo "   ./deploy-infrastructure.sh              → Full deployment (default)"
+    echo "   ./deploy-infrastructure.sh plan         → Show deployment plan only"  
+    echo "   ./deploy-infrastructure.sh init         → Initialize Terraform only"
+    echo "   ./deploy-infrastructure.sh rollback     → Destroy all resources (full rollback)"
+    echo ""
+    echo "ENHANCED ROLLBACK OPTIONS:"
+    echo "   ./deploy-infrastructure.sh rollback --component app        → Rollback application containers only"
+    echo "   ./deploy-infrastructure.sh rollback --component cookies    → Rollback cookie management only"
+    echo "   ./deploy-infrastructure.sh rollback --dry-run             → Show rollback plan without executing"
+    echo "   ./deploy-infrastructure.sh rollback --help                → Show detailed rollback options"
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
@@ -386,7 +667,47 @@ main() {
     # Handle command line arguments
     case "${1:-}" in
         "rollback"|"destroy")
-            rollback_deployment
+            # Parse rollback-specific parameters
+            shift # Remove 'rollback' from arguments
+            
+            while [[ $# -gt 0 ]]; do
+                case $1 in
+                    --component)
+                        ROLLBACK_COMPONENT="$2"
+                        shift 2
+                        ;;
+                    --version)
+                        TARGET_VERSION="$2"
+                        shift 2
+                        ;;
+                    --dry-run)
+                        DRY_RUN=true
+                        shift
+                        ;;
+                    --force)
+                        FORCE=true
+                        shift
+                        ;;
+                    --help)
+                        show_rollback_help
+                        exit 0
+                        ;;
+                    *)
+                        error "Unknown rollback option: $1"
+                        show_rollback_help
+                        exit 1
+                        ;;
+                esac
+            done
+            
+            # Execute appropriate rollback based on component
+            if [[ "$ROLLBACK_COMPONENT" == "all" && "$DRY_RUN" == "false" && -z "$TARGET_VERSION" ]]; then
+                # Full infrastructure destruction (legacy behavior)
+                rollback_deployment_full
+            else
+                # Enhanced component-based rollback
+                rollback_deployment_enhanced
+            fi
             ;;
         "plan")
             check_prerequisites

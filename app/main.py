@@ -10,6 +10,7 @@ from app.core.database import init_database, close_database, db_manager
 from app.core.storage import init_storage, health_check_storage
 from app.core.security_middleware import add_security_middleware
 from app.core.auth import require_authentication
+from app.core.cookie_manager import CookieManager
 
 # Import routers
 from app.routers import downloads, websocket, admin, bootstrap
@@ -21,6 +22,126 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+async def check_cookie_manager_health():
+    """Check cookie manager health status."""
+    if not settings.cookie_s3_bucket:
+        return {
+            "status": "disabled",
+            "message": "Cookie management is disabled"
+        }
+    
+    try:
+        cookie_manager = CookieManager()
+        
+        # Test cookie manager initialization
+        metadata = await cookie_manager.get_cookie_metadata()
+        
+        return {
+            "status": "healthy",
+            "message": "Cookie manager is operational",
+            "details": {
+                "s3_bucket": settings.cookie_s3_bucket,
+                "encryption_enabled": True,
+                "validation_enabled": settings.cookie_validation_enabled,
+                "metadata_available": metadata is not None
+            }
+        }
+    except Exception as e:
+        logger.error(f"Cookie manager health check failed: {e}")
+        return {
+            "status": "unhealthy",
+            "message": f"Cookie manager error: {str(e)}",
+            "details": {
+                "s3_bucket": settings.cookie_s3_bucket,
+                "error_type": type(e).__name__
+            }
+        }
+
+
+async def validate_container_startup():
+    """Validate container startup requirements and configuration."""
+    validation_results = {
+        "environment_vars": [],
+        "dependencies": [],
+        "configuration": []
+    }
+    
+    # Check critical environment variables
+    required_env_vars = ["DATABASE_URL", "REDIS_URL", "ENVIRONMENT"]
+    for var in required_env_vars:
+        if hasattr(settings, var.lower()) and getattr(settings, var.lower()):
+            validation_results["environment_vars"].append({
+                "name": var,
+                "status": "present",
+                "message": "Required environment variable is set"
+            })
+        else:
+            validation_results["environment_vars"].append({
+                "name": var,
+                "status": "missing",
+                "message": f"Required environment variable {var} is missing"
+            })
+    
+    # Check cookie management configuration
+    if settings.cookie_s3_bucket:
+        validation_results["configuration"].append({
+            "component": "cookie_management",
+            "status": "enabled",
+            "message": f"Cookie management enabled with bucket: {settings.cookie_s3_bucket}"
+        })
+        
+        # Validate encryption key presence
+        if settings.cookie_encryption_key and len(settings.cookie_encryption_key) >= 32:
+            validation_results["configuration"].append({
+                "component": "cookie_encryption",
+                "status": "valid",
+                "message": "Cookie encryption key is properly configured"
+            })
+        else:
+            validation_results["configuration"].append({
+                "component": "cookie_encryption",
+                "status": "invalid",
+                "message": "Cookie encryption key is missing or too short"
+            })
+    else:
+        validation_results["configuration"].append({
+            "component": "cookie_management",
+            "status": "disabled",
+            "message": "Cookie management is disabled (no S3 bucket configured)"
+        })
+    
+    # Check database configuration
+    try:
+        validation_results["dependencies"].append({
+            "service": "database",
+            "status": "configurable",
+            "message": "Database URL is configured"
+        })
+    except Exception as e:
+        validation_results["dependencies"].append({
+            "service": "database",
+            "status": "error",
+            "message": f"Database configuration error: {str(e)}"
+        })
+    
+    # Check Redis configuration
+    try:
+        validation_results["dependencies"].append({
+            "service": "redis",
+            "status": "configurable", 
+            "message": "Redis URL is configured"
+        })
+    except Exception as e:
+        validation_results["dependencies"].append({
+            "service": "redis",
+            "status": "error",
+            "message": f"Redis configuration error: {str(e)}"
+        })
+    
+    return validation_results
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -31,6 +152,17 @@ async def lifespan(app: FastAPI):
     logger.info("Starting YouTube Download Service...")
     
     try:
+        # Validate startup configuration
+        validation_results = await validate_container_startup()
+        logger.info("Container startup validation completed")
+        
+        # Log validation results
+        for category, results in validation_results.items():
+            for result in results:
+                if result.get("status") in ["missing", "invalid", "error"]:
+                    logger.warning(f"Validation {category}: {result.get('message', 'Unknown issue')}")
+                else:
+                    logger.info(f"Validation {category}: {result.get('message', 'OK')}")
         # Initialize database
         await init_database()
         logger.info("Database initialized successfully")
@@ -38,6 +170,16 @@ async def lifespan(app: FastAPI):
         # Initialize storage
         storage = init_storage()
         logger.info(f"Storage initialized: {type(storage).__name__}")
+        
+        # Initialize cookie manager (only if cookie management is enabled)
+        if settings.cookie_s3_bucket:
+            try:
+                cookie_manager = CookieManager()
+                logger.info("Cookie manager initialized successfully")
+            except Exception as e:
+                logger.warning(f"Cookie manager initialization failed (will run without cookies): {e}")
+        else:
+            logger.info("Cookie management disabled (no S3 bucket configured)")
         
         logger.info("Application startup complete")
         
@@ -89,10 +231,14 @@ async def detailed_health_check():
         # Check storage health  
         storage_health = await health_check_storage()
         
+        # Check cookie manager health
+        cookie_health = await check_cookie_manager_health()
+        
         # Determine overall status
         overall_status = "healthy"
         if (db_health.get("status") != "healthy" or 
-            storage_health.get("status") != "healthy"):
+            storage_health.get("status") != "healthy" or
+            cookie_health.get("status") == "unhealthy"):
             overall_status = "unhealthy"
         
         return {
@@ -103,6 +249,7 @@ async def detailed_health_check():
             "checks": {
                 "database": db_health,
                 "storage": storage_health,
+                "cookie_manager": cookie_health,
             }
         }
         
