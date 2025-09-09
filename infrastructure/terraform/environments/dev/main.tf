@@ -81,27 +81,33 @@ module "storage" {
   cors_allowed_origins       = var.storage_cors_allowed_origins
 }
 
-# Secure Storage Module for Cookie Management - COMMENTED OUT FOR ROLLBACK
-# module "secure_storage" {
-#   source = "../../modules/secure-storage"
-#
-#   project_name = var.project_name
-#   environment  = local.environment
-#   
-#   # Encryption configuration
-#   kms_key_description = "KMS key for secure cookie storage encryption"
-#   enable_key_rotation = true
-#   
-#   # Access control
-#   allowed_service_principals = [
-#     "ecs-tasks.amazonaws.com"
-#   ]
-#   
-#   # Lifecycle management
-#   lifecycle_expiration_days    = 90
-#   lifecycle_noncurrent_days    = 30
-#   lifecycle_abort_incomplete_days = 7
-# }
+# Secure Storage Module for Cookie Management
+module "secure_storage" {
+  source = "../../modules/secure-storage"
+
+  project_name      = var.project_name
+  environment       = local.environment
+  ecs_task_role_arn = module.compute.ecs_task_role_arn
+  
+  # Storage configuration
+  enable_encryption     = true
+  enable_versioning     = true
+  enable_access_logging = true
+  
+  # Lifecycle management
+  cookie_retention_days  = 90
+  version_retention_days = 30
+  log_retention_days     = 365
+  
+  # Security monitoring
+  enable_security_monitoring  = true
+  enable_cloudwatch_logging   = true
+  
+  tags = {
+    Purpose = "cookie-management"
+    Service = "youtube-downloader"
+  }
+}
 
 # Database Module
 module "database" {
@@ -173,8 +179,8 @@ module "compute" {
   redis_url_parameter     = aws_ssm_parameter.redis_url.name
   bootstrap_token_parameter = aws_ssm_parameter.bootstrap_token.name
   
-  # Secure Storage Integration - COMMENTED OUT FOR ROLLBACK  
-  # secure_storage_config = module.secure_storage.s3_config
+  # Secure Storage Integration
+  secure_storage_config = module.secure_storage.s3_config
   
   # Container Images (will need to be built and pushed to ECR)
   app_image    = var.app_image
