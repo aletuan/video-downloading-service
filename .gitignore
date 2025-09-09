@@ -148,3 +148,20 @@ Thumbs.db
 
 # AWS
 .aws/
+
+# Sensitive Cookie Files (contain authentication data)
+# Never commit real cookie files to version control
+scripts/test-cookies.txt
+scripts/*-cookies.txt
+scripts/cookies/
+**/cookies.txt
+**/test-cookies.txt
+**/*-cookies.txt
+cookies/
+*.netscape
+*.cookie
+
+# Temporary cookie files
+temp_cookies/
+youtube_cookies/
+**/youtube_cookies_*
