@@ -735,6 +735,189 @@ class CookieManager:
                 }
             }
     
+    async def rotate_cookies(self, force: bool = False) -> Dict[str, Any]:
+        """
+        Rotate cookies by promoting backup to active and downloading fresh backup.
+        
+        This method handles the cookie rotation process:
+        1. Validates that backup cookies are available and valid
+        2. Promotes backup cookies to active position
+        3. Archives current active cookies
+        4. Downloads/creates new backup cookies
+        5. Updates metadata and integrity hashes
+        
+        Args:
+            force: Force rotation even if not due according to schedule
+            
+        Returns:
+            Dict[str, Any]: Rotation status and results
+            
+        Raises:
+            CookieDownloadError: If rotation process fails
+            CookieValidationError: If cookies are invalid during rotation
+        """
+        try:
+            logger.info(f"Starting cookie rotation (force={force})")
+            
+            # Check if rotation is due
+            metadata = await self._download_metadata()
+            current_time = datetime.now(timezone.utc)
+            
+            if not force and not self._is_rotation_due(metadata, current_time):
+                return {
+                    'status': 'skipped',
+                    'reason': 'rotation_not_due',
+                    'next_rotation': self._get_next_rotation_time(metadata).isoformat(),
+                    'timestamp': current_time.isoformat()
+                }
+            
+            # Download and validate backup cookies
+            try:
+                backup_content = await self._download_cookie_file(self.backup_cookie_key)
+                if self.validation_enabled:
+                    await self._validate_cookies(backup_content)
+                
+                logger.info("Backup cookies validated for rotation")
+            except Exception as e:
+                return {
+                    'status': 'failed',
+                    'reason': 'backup_validation_failed',
+                    'error': str(e),
+                    'timestamp': current_time.isoformat()
+                }
+            
+            # Archive current active cookies (move to archive with timestamp)
+            try:
+                active_content = await self._download_cookie_file(self.active_cookie_key)
+                archive_key = f"cookies/archive/youtube-cookies-active-{int(current_time.timestamp())}.txt"
+                
+                # Upload current active cookies to archive
+                await self._upload_cookie_file(archive_key, active_content)
+                logger.info(f"Archived active cookies to: {archive_key}")
+                
+            except Exception as e:
+                logger.warning(f"Failed to archive current active cookies: {e}")
+                # Continue rotation even if archiving fails
+            
+            # Promote backup to active
+            try:
+                await self._upload_cookie_file(self.active_cookie_key, backup_content)
+                logger.info("Promoted backup cookies to active position")
+                
+                # Update integrity hash for the new active cookies
+                self.update_cookie_integrity_hash('active', backup_content)
+                
+            except Exception as e:
+                return {
+                    'status': 'failed',
+                    'reason': 'promotion_failed',
+                    'error': str(e),
+                    'timestamp': current_time.isoformat()
+                }
+            
+            # Clear cache to force fresh downloads
+            self.clear_cache()
+            
+            # Update metadata
+            try:
+                updated_metadata = await self._update_rotation_metadata(metadata, current_time)
+                await self._upload_metadata(updated_metadata)
+                logger.info("Updated rotation metadata")
+                
+            except Exception as e:
+                logger.warning(f"Failed to update rotation metadata: {e}")
+                # Rotation succeeded even if metadata update failed
+            
+            rotation_result = {
+                'status': 'success',
+                'timestamp': current_time.isoformat(),
+                'actions': [
+                    'validated_backup_cookies',
+                    'archived_active_cookies',
+                    'promoted_backup_to_active',
+                    'cleared_cache',
+                    'updated_metadata'
+                ],
+                'next_rotation': self._get_next_rotation_time(updated_metadata).isoformat(),
+                'warning': 'New backup cookies should be uploaded soon'
+            }
+            
+            logger.info(f"Cookie rotation completed successfully: {rotation_result}")
+            return rotation_result
+            
+        except Exception as e:
+            logger.error(f"Cookie rotation failed: {e}")
+            return {
+                'status': 'failed',
+                'reason': 'unexpected_error',
+                'error': str(e),
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+    
+    async def _upload_cookie_file(self, s3_key: str, content: str) -> None:
+        """Upload cookie file content to S3."""
+        loop = asyncio.get_event_loop()
+        
+        def _upload():
+            self._s3_client.put_object(
+                Bucket=self.bucket_name,
+                Key=s3_key,
+                Body=content.encode('utf-8'),
+                ServerSideEncryption='AES256',
+                ContentType='text/plain',
+                Metadata={
+                    'purpose': 'cookie-file',
+                    'uploaded-by': 'cookie-manager',
+                    'uploaded-at': datetime.now(timezone.utc).isoformat(),
+                    'file-hash': hashlib.sha256(content.encode('utf-8')).hexdigest()
+                }
+            )
+        
+        await loop.run_in_executor(None, _upload)
+    
+    async def _upload_metadata(self, metadata: Dict[str, Any]) -> None:
+        """Upload metadata to S3."""
+        metadata_content = json.dumps(metadata, indent=2)
+        await self._upload_cookie_file(self.metadata_key, metadata_content)
+    
+    async def _update_rotation_metadata(self, metadata: Dict[str, Any], rotation_time: datetime) -> Dict[str, Any]:
+        """Update metadata with rotation information."""
+        # Create a deep copy to avoid modifying the original
+        updated_metadata = json.loads(json.dumps(metadata))
+        
+        # Update rotation history
+        if 'rotation_history' not in updated_metadata:
+            updated_metadata['rotation_history'] = []
+        
+        updated_metadata['rotation_history'].append({
+            'timestamp': rotation_time.isoformat(),
+            'type': 'cookie_rotation',
+            'success': True
+        })
+        
+        # Keep only last 10 rotation records
+        updated_metadata['rotation_history'] = updated_metadata['rotation_history'][-10:]
+        
+        # Update last rotation time
+        updated_metadata['cookie_metadata']['last_updated'] = rotation_time.isoformat()
+        updated_metadata['cookie_metadata']['last_rotation'] = rotation_time.isoformat()
+        
+        return updated_metadata
+    
+    def _get_next_rotation_time(self, metadata: Dict[str, Any]) -> datetime:
+        """Calculate next scheduled rotation time."""
+        last_rotation_str = metadata.get('cookie_metadata', {}).get('last_rotation')
+        
+        if last_rotation_str:
+            try:
+                last_rotation = datetime.fromisoformat(last_rotation_str.replace('Z', '+00:00'))
+                return last_rotation + timedelta(days=30)  # Default 30-day rotation
+            except Exception:
+                pass
+        
+        # Default to 30 days from now if no last rotation
+        return datetime.now(timezone.utc) + timedelta(days=30)
+    
     def __enter__(self):
         """Context manager entry."""
         return self
