@@ -37,12 +37,12 @@ This document tracks the implementation of enhanced YouTube download functionali
 
 ### Terraform Infrastructure
 
-- [ ] Create `infrastructure/modules/secure-storage/main.tf`
-- [ ] Define S3 bucket resource with encryption
-- [ ] Configure IAM policies for ECS task role
-- [ ] Add CloudWatch logging for S3 access
-- [ ] Implement backup and versioning policies
-- [ ] Add outputs for bucket name and ARN
+- [x] Create `infrastructure/modules/secure-storage/main.tf`
+- [x] Define S3 bucket resource with encryption
+- [x] Configure IAM policies for ECS task role
+- [x] Add CloudWatch logging for S3 access
+- [x] Implement backup and versioning policies
+- [x] Add outputs for bucket name and ARN
 
 ## Phase 2: Cookie Management Service
 
