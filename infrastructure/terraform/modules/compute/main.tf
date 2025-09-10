@@ -163,7 +163,6 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
 
 # Cookie Management IAM Policy (separate policy for better organization)
 resource "aws_iam_role_policy" "ecs_task_cookie_management" {
-  count = var.secure_storage_config.bucket_arn != "" ? 1 : 0
   name  = "${var.project_name}-${var.environment}-ecs-cookie-management"
   role  = aws_iam_role.ecs_task.id
 
@@ -176,17 +175,14 @@ resource "aws_iam_role_policy" "ecs_task_cookie_management" {
         Action = [
           "s3:GetObject",
           "s3:GetObjectVersion",
+          "s3:PutObject",
+          "s3:DeleteObject",
           "s3:ListBucket"
         ]
         Resource = [
-          var.secure_storage_config.bucket_arn,
-          "${var.secure_storage_config.bucket_arn}/*"
+          "arn:aws:s3:::${var.project_name}-${var.environment}-secure-config-*",
+          "arn:aws:s3:::${var.project_name}-${var.environment}-secure-config-*/cookies/*"
         ]
-        Condition = {
-          StringLike = {
-            "s3:prefix" = "${var.secure_storage_config.cookie_path_prefix}*"
-          }
-        }
       },
       {
         Sid    = "ParameterStoreAccess"
@@ -197,8 +193,7 @@ resource "aws_iam_role_policy" "ecs_task_cookie_management" {
           "ssm:GetParametersByPath"
         ]
         Resource = [
-          "arn:aws:ssm:*:*:parameter/${var.project_name}/${var.environment}/cookie/*",
-          "arn:aws:ssm:*:*:parameter/${var.project_name}/${var.environment}/encryption/*"
+          "arn:aws:ssm:*:*:parameter/${var.project_name}/${var.environment}/cookie/*"
         ]
       },
       {
@@ -259,8 +254,8 @@ resource "aws_ecs_task_definition" "app" {
           value = var.s3_bucket_name
         },
         {
-          name  = "COOKIE_S3_BUCKET"
-          value = var.secure_storage_config.bucket_name
+          name  = "COOKIE_S3_BUCKET_PREFIX"
+          value = "${var.project_name}-${var.environment}-secure-config"
         },
         {
           name  = "AWS_REGION"
@@ -343,8 +338,8 @@ resource "aws_ecs_task_definition" "worker" {
           value = var.s3_bucket_name
         },
         {
-          name  = "COOKIE_S3_BUCKET"
-          value = var.secure_storage_config.bucket_name
+          name  = "COOKIE_S3_BUCKET_PREFIX"
+          value = "${var.project_name}-${var.environment}-secure-config"
         },
         {
           name  = "AWS_REGION"

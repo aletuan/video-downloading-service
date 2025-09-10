@@ -158,17 +158,67 @@ deploy_module() {
     log "🔄 Phase $phase: $description"
     cd "$TERRAFORM_DIR"
     
-    # Plan and Apply
-    if terraform plan -target="module.$module" -out="/tmp/terraform-$module.plan" &>/dev/null; then
-        if terraform apply "/tmp/terraform-$module.plan"; then
+    # Debug: Show current working directory and terraform state
+    log "Debug: Working directory: $(pwd)"
+    log "Debug: Terraform state file exists: $(test -f terraform.tfstate && echo 'YES' || echo 'NO')"
+    
+    # Plan phase with detailed logging
+    log "Planning terraform module: $module"
+    if terraform plan -target="module.$module" -out="/tmp/terraform-$module.plan" 2>&1 | tee "/tmp/terraform-$module-plan.log"; then
+        log "Plan successful, proceeding with apply..."
+        
+        # Apply phase with detailed logging
+        log "Applying terraform module: $module"
+        if terraform apply "/tmp/terraform-$module.plan" 2>&1 | tee "/tmp/terraform-$module-apply.log"; then
             success "Phase $phase COMPLETED"
             rm -f "/tmp/terraform-$module.plan"
             return 0
+        else
+            error "Apply failed for module $module"
+            log "Apply log saved to: /tmp/terraform-$module-apply.log"
         fi
+    else
+        error "Plan failed for module $module"
+        log "Plan log saved to: /tmp/terraform-$module-plan.log"
     fi
     
     error "Phase $phase FAILED"
+    log "Debug logs available at:"
+    log "  - Plan: /tmp/terraform-$module-plan.log"
+    log "  - Apply: /tmp/terraform-$module-apply.log"
     return 1
+}
+
+# Debug: Deploy just Phase 6F for troubleshooting
+debug_phase_6f() {
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "DEBUG MODE: Running Phase 6F (Compute Platform) Only"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # Ensure we're in the right directory
+    cd "$TERRAFORM_DIR"
+    
+    # Show terraform status before attempting Phase 6F
+    log "Current terraform state:"
+    terraform state list | grep -E "(compute|secure_storage)" || log "No compute/secure_storage resources in state"
+    
+    # Check for any drift in existing resources that compute depends on
+    log "Checking dependencies (networking, storage, database modules):"
+    terraform plan -target="module.networking" -detailed-exitcode || log "Networking module has changes"
+    terraform plan -target="module.storage" -detailed-exitcode || log "Storage module has changes" 
+    terraform plan -target="module.database" -detailed-exitcode || log "Database module has changes"
+    
+    # Now attempt Phase 6F with full debugging
+    deploy_module "6F" "compute" "Compute Platform (ECS Fargate Cluster + Task Definitions)"
+    
+    if [ $? -eq 0 ]; then
+        success "Phase 6F Debug Run COMPLETED"
+    else
+        error "Phase 6F Debug Run FAILED"
+        log "Checking logs for detailed error information..."
+        [ -f "/tmp/terraform-compute-plan.log" ] && tail -20 "/tmp/terraform-compute-plan.log"
+        [ -f "/tmp/terraform-compute-apply.log" ] && tail -20 "/tmp/terraform-compute-apply.log"
+    fi
 }
 
 # Deploy all infrastructure phases
@@ -719,6 +769,22 @@ main() {
         "init")
             check_prerequisites
             terraform_init
+            ;;
+        "debug")
+            # Debug specific phase
+            case "${2:-}" in
+                "6f"|"phase6f"|"compute")
+                    log "🔍 Running Phase 6F debug session..."
+                    check_prerequisites
+                    terraform_init
+                    debug_phase_6f
+                    ;;
+                *)
+                    error "Please specify which phase to debug: 6f, phase6f, or compute"
+                    echo "Usage: $0 debug 6f"
+                    exit 1
+                    ;;
+            esac
             ;;
         *)
             # Default: Full deployment

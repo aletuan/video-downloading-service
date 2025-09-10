@@ -167,6 +167,9 @@ resource "aws_s3_bucket_lifecycle_configuration" "secure_config" {
     id     = "cookie_file_lifecycle"
     status = "Enabled"
 
+    # Apply to all objects in the bucket
+    filter {}
+
     # Keep current versions for 90 days
     expiration {
       days = 90
@@ -205,6 +208,9 @@ resource "aws_s3_bucket_lifecycle_configuration" "access_logs" {
   rule {
     id     = "logs_cleanup"
     status = "Enabled"
+
+    # Apply to all objects in the logs bucket
+    filter {}
 
     # Keep logs for 1 year
     expiration {

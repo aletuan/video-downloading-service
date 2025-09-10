@@ -165,6 +165,229 @@ resource "aws_ssm_parameter" "bootstrap_token" {
   tags = local.common_tags
 }
 
+# Generate random value for cookie encryption key
+resource "random_id" "cookie_key" {
+  byte_length = 32
+}
+
+resource "aws_ssm_parameter" "cookie_encryption_key" {
+  name        = "/${var.project_name}/${local.environment}/cookie/encryption-key"
+  description = "Cookie encryption key for YouTube downloader service"
+  type        = "SecureString"
+  value       = base64encode(random_id.cookie_key.id)
+
+  tags = local.common_tags
+}
+
+# Database Migration - Run after compute module is deployed
+resource "null_resource" "database_migration" {
+  depends_on = [
+    module.compute,
+    module.database,
+    aws_ssm_parameter.database_url,
+    aws_ssm_parameter.cookie_encryption_key
+  ]
+
+  triggers = {
+    # Re-run if database endpoint changes or compute module changes
+    database_endpoint = module.database.postgres_endpoint
+    cluster_name     = module.compute.cluster_name
+    always_run       = timestamp()
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOF
+      set -e
+      
+      echo "Initiating database migration process..."
+      
+      # Get cluster name and task definition
+      CLUSTER_NAME="${module.compute.cluster_name}"
+      echo "Using ECS cluster: $CLUSTER_NAME"
+      
+      # Get the latest task definition ARN
+      echo "Retrieving task definition for migration..."
+      TASK_DEF_ARN=$(aws ecs describe-task-definition \
+        --task-definition "${var.project_name}-${local.environment}-app" \
+        --query 'taskDefinition.taskDefinitionArn' \
+        --output text 2>/dev/null)
+      
+      if [[ -z "$TASK_DEF_ARN" || "$TASK_DEF_ARN" == "None" ]]; then
+        echo "Could not find task definition for ${var.project_name}-${local.environment}-app"
+        exit 1
+      fi
+      
+      echo "Task definition found: $(basename $TASK_DEF_ARN)"
+      
+      # Get subnet IDs for network configuration
+      SUBNET_IDS='${jsonencode(module.networking.public_subnet_ids)}'
+      SUBNET_LIST=$(echo $SUBNET_IDS | jq -r '.[]' | tr '\n' ',' | sed 's/,$//')
+      echo "Network configuration prepared with $(echo $SUBNET_LIST | tr ',' '\n' | wc -l | tr -d ' ') subnets"
+      
+      # First attempt: Run Alembic migration
+      echo "Attempting Alembic migration (preferred method)..."
+      MIGRATION_TASK=$(aws ecs run-task \
+        --cluster "$CLUSTER_NAME" \
+        --task-definition "$TASK_DEF_ARN" \
+        --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_LIST],securityGroups=[${module.networking.ecs_security_group_id}],assignPublicIp=ENABLED}" \
+        --overrides '{"containerOverrides":[{"name":"fastapi-app","command":["alembic","upgrade","head"]}]}' \
+        --launch-type FARGATE \
+        --query 'tasks[0].taskArn' \
+        --output text 2>/dev/null || echo "FAILED")
+      
+      if [[ "$MIGRATION_TASK" != "FAILED" && "$MIGRATION_TASK" != "None" && -n "$MIGRATION_TASK" ]]; then
+        echo "Alembic migration task started: $(basename $MIGRATION_TASK)"
+        echo "Waiting for migration to complete (timeout: 5 minutes)..."
+        
+        # Wait for task to complete (with timeout)
+        if aws ecs wait tasks-stopped --cluster "$CLUSTER_NAME" --tasks "$MIGRATION_TASK" --cli-read-timeout 300; then
+          # Check exit code
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster "$CLUSTER_NAME" \
+            --tasks "$MIGRATION_TASK" \
+            --query 'tasks[0].containers[0].exitCode' \
+            --output text 2>/dev/null || echo "1")
+          
+          if [[ "$EXIT_CODE" == "0" ]]; then
+            echo "Alembic migration completed successfully"
+            echo "Database schema is up to date"
+            exit 0
+          else
+            echo "Alembic migration failed (exit code: $EXIT_CODE)"
+            echo "Attempting fallback method..."
+          fi
+        else
+          echo "Alembic migration task timed out or failed"
+          echo "Attempting fallback method..."
+        fi
+      else
+        echo "Could not start Alembic migration task"
+        echo "Attempting fallback method..."
+      fi
+      
+      # Fallback: Direct table creation using Python script
+      echo "Creating database tables directly (fallback method)..."
+      
+      # Create Python script for table creation
+      PYTHON_SCRIPT='
+import os
+import asyncio
+import asyncpg
+import sys
+
+async def create_tables():
+    try:
+        database_url = os.getenv("DATABASE_URL")
+        if not database_url:
+            print("DATABASE_URL environment variable not found")
+            sys.exit(1)
+            
+        print("Connecting to PostgreSQL database...")
+        conn = await asyncpg.connect(database_url)
+        
+        # Create api_keys table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                key VARCHAR(255) UNIQUE NOT NULL,
+                permission_level VARCHAR(50) NOT NULL,
+                description TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP WITH TIME ZONE,
+                usage_count INTEGER DEFAULT 0,
+                created_by VARCHAR(255)
+            );
+        """)
+        print("api_keys table created/verified")
+        
+        # Create download_jobs table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS download_jobs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                url VARCHAR(2048) NOT NULL,
+                status VARCHAR(50) DEFAULT 'queued',
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP WITH TIME ZONE,
+                quality VARCHAR(50),
+                output_format VARCHAR(50),
+                include_transcription BOOLEAN DEFAULT FALSE,
+                subtitle_languages JSON,
+                video_info JSON,
+                files JSON,
+                progress INTEGER DEFAULT 0,
+                error_message TEXT,
+                retry_count INTEGER DEFAULT 0
+            );
+        """)
+        print("download_jobs table created/verified")
+        
+        # Create alembic_version table for future migrations
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS alembic_version (
+                version_num VARCHAR(32) NOT NULL,
+                CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
+            );
+        """)
+        print("alembic_version table created/verified")
+        
+        await conn.close()
+        print("Database migration completed successfully")
+        
+    except Exception as e:
+        print(f"Database migration failed: {str(e)}")
+        sys.exit(1)
+
+asyncio.run(create_tables())
+'
+      
+      echo "Starting table creation task..."
+      TABLE_TASK=$(aws ecs run-task \
+        --cluster "$CLUSTER_NAME" \
+        --task-definition "$TASK_DEF_ARN" \
+        --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_LIST],securityGroups=[${module.networking.ecs_security_group_id}],assignPublicIp=ENABLED}" \
+        --overrides "{\"containerOverrides\":[{\"name\":\"fastapi-app\",\"command\":[\"python\",\"-c\",\"$(echo "$PYTHON_SCRIPT" | sed 's/"/\\"/g')\"]}]}" \
+        --launch-type FARGATE \
+        --query 'tasks[0].taskArn' \
+        --output text 2>/dev/null || echo "FAILED")
+      
+      if [[ "$TABLE_TASK" != "FAILED" && "$TABLE_TASK" != "None" && -n "$TABLE_TASK" ]]; then
+        echo "Table creation task started: $(basename $TABLE_TASK)"
+        echo "Waiting for table creation to complete (timeout: 5 minutes)..."
+        
+        if aws ecs wait tasks-stopped --cluster "$CLUSTER_NAME" --tasks "$TABLE_TASK" --cli-read-timeout 300; then
+          # Check exit code
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster "$CLUSTER_NAME" \
+            --tasks "$TABLE_TASK" \
+            --query 'tasks[0].containers[0].exitCode' \
+            --output text 2>/dev/null || echo "1")
+          
+          if [[ "$EXIT_CODE" == "0" ]]; then
+            echo "Database tables created successfully (fallback method)"
+            echo "Tables: api_keys, download_jobs, alembic_version"
+          else
+            echo "Table creation failed (exit code: $EXIT_CODE)"
+            echo "Database migration could not be completed"
+            exit 1
+          fi
+        else
+          echo "Table creation task timed out"
+          echo "Database migration could not be completed"
+          exit 1
+        fi
+      else
+        echo "Could not start table creation task"
+        echo "Database migration failed completely"
+        exit 1
+      fi
+    EOF
+  }
+}
+
 # Compute Module
 module "compute" {
   source = "../../modules/compute"
@@ -245,234 +468,3 @@ module "load_balancer" {
   tags = local.common_tags
 }
 
-# Database Migration - Run after compute module is deployed
-resource "null_resource" "database_migration" {
-  depends_on = [
-    module.compute,
-    module.database,
-    aws_ssm_parameter.database_url
-  ]
-
-  triggers = {
-    # Re-run if database endpoint changes or compute module changes
-    database_endpoint = module.database.postgres_endpoint
-    cluster_name     = module.compute.cluster_name
-    always_run       = timestamp()
-  }
-
-  provisioner "local-exec" {
-    command = <<-EOF
-      set -e
-      
-      # Colors for output formatting (matching deployment script style)
-      RED='\033[0;31m'
-      GREEN='\033[0;32m'
-      YELLOW='\033[1;33m'
-      BLUE='\033[0;34m'
-      NC='\033[0m'
-      
-      # Utility functions (matching deployment script style)
-      log() {
-          echo -e "$${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] $$1$${NC}"
-      }
-      
-      success() {
-          echo -e "$${GREEN}✅ $$1$${NC}"
-      }
-      
-      warning() {
-          echo -e "$${YELLOW}⚠️  $$1$${NC}"
-      }
-      
-      error() {
-          echo -e "$${RED}❌ $$1$${NC}"
-      }
-      
-      log "🗄️  Initiating database migration process..."
-      
-      # Get cluster name and task definition
-      CLUSTER_NAME="${module.compute.cluster_name}"
-      log "Using ECS cluster: $${CLUSTER_NAME}"
-      
-      # Get the latest task definition ARN
-      log "Retrieving task definition for migration..."
-      TASK_DEF_ARN=$(aws ecs describe-task-definition \
-        --task-definition "${var.project_name}-${local.environment}-app" \
-        --query 'taskDefinition.taskDefinitionArn' \
-        --output text 2>/dev/null)
-      
-      if [[ -z "$TASK_DEF_ARN" || "$TASK_DEF_ARN" == "None" ]]; then
-        error "Could not find task definition for ${var.project_name}-${local.environment}-app"
-        exit 1
-      fi
-      
-      log "Task definition found: $$(basename $${TASK_DEF_ARN})"
-      
-      # Get subnet IDs for network configuration
-      SUBNET_IDS='${jsonencode(module.networking.public_subnet_ids)}'
-      SUBNET_LIST=$(echo $SUBNET_IDS | jq -r '.[]' | tr '\n' ',' | sed 's/,$//')
-      log "Network configuration prepared with $$(echo $SUBNET_LIST | tr ',' '\n' | wc -l | tr -d ' ') subnets"
-      
-      # First attempt: Run Alembic migration
-      log "🔄 Attempting Alembic migration (preferred method)..."
-      MIGRATION_TASK=$(aws ecs run-task \
-        --cluster "$CLUSTER_NAME" \
-        --task-definition "$TASK_DEF_ARN" \
-        --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_LIST],securityGroups=[${module.networking.ecs_security_group_id}],assignPublicIp=ENABLED}" \
-        --overrides '{"containerOverrides":[{"name":"fastapi-app","command":["alembic","upgrade","head"]}]}' \
-        --launch-type FARGATE \
-        --query 'tasks[0].taskArn' \
-        --output text 2>/dev/null || echo "FAILED")
-      
-      if [[ "$MIGRATION_TASK" != "FAILED" && "$MIGRATION_TASK" != "None" && -n "$MIGRATION_TASK" ]]; then
-        log "Alembic migration task started: $$(basename $${MIGRATION_TASK})"
-        log "⏳ Waiting for migration to complete (timeout: 5 minutes)..."
-        
-        # Wait for task to complete (with timeout)
-        if aws ecs wait tasks-stopped --cluster "$CLUSTER_NAME" --tasks "$MIGRATION_TASK" --cli-read-timeout 300; then
-          # Check exit code
-          EXIT_CODE=$(aws ecs describe-tasks \
-            --cluster "$CLUSTER_NAME" \
-            --tasks "$MIGRATION_TASK" \
-            --query 'tasks[0].containers[0].exitCode' \
-            --output text 2>/dev/null || echo "1")
-          
-          if [[ "$EXIT_CODE" == "0" ]]; then
-            success "Alembic migration completed successfully"
-            success "Database schema is up to date"
-            exit 0
-          else
-            warning "Alembic migration failed (exit code: $${EXIT_CODE})"
-            warning "Attempting fallback method..."
-          fi
-        else
-          warning "Alembic migration task timed out or failed"
-          warning "Attempting fallback method..."
-        fi
-      else
-        warning "Could not start Alembic migration task"
-        warning "Attempting fallback method..."
-      fi
-      
-      # Fallback: Direct table creation using Python script
-      log "🔄 Creating database tables directly (fallback method)..."
-      
-      # Create Python script for table creation
-      PYTHON_SCRIPT='
-import os
-import asyncio
-import asyncpg
-import sys
-
-async def create_tables():
-    try:
-        database_url = os.getenv("DATABASE_URL")
-        if not database_url:
-            print("❌ DATABASE_URL environment variable not found")
-            sys.exit(1)
-            
-        print("🔗 Connecting to PostgreSQL database...")
-        conn = await asyncpg.connect(database_url)
-        
-        # Create api_keys table
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS api_keys (
-                id SERIAL PRIMARY KEY,
-                name VARCHAR(255) NOT NULL,
-                key VARCHAR(255) UNIQUE NOT NULL,
-                permission_level VARCHAR(50) NOT NULL,
-                description TEXT,
-                is_active BOOLEAN DEFAULT TRUE,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                expires_at TIMESTAMP WITH TIME ZONE,
-                usage_count INTEGER DEFAULT 0,
-                created_by VARCHAR(255)
-            );
-        """)
-        print("✅ api_keys table created/verified")
-        
-        # Create download_jobs table
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS download_jobs (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                url VARCHAR(2048) NOT NULL,
-                status VARCHAR(50) DEFAULT 'queued',
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                completed_at TIMESTAMP WITH TIME ZONE,
-                quality VARCHAR(50),
-                output_format VARCHAR(50),
-                include_transcription BOOLEAN DEFAULT FALSE,
-                subtitle_languages JSON,
-                video_info JSON,
-                files JSON,
-                progress INTEGER DEFAULT 0,
-                error_message TEXT,
-                retry_count INTEGER DEFAULT 0
-            );
-        """)
-        print("✅ download_jobs table created/verified")
-        
-        # Create alembic_version table for future migrations
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS alembic_version (
-                version_num VARCHAR(32) NOT NULL,
-                CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
-            );
-        """)
-        print("✅ alembic_version table created/verified")
-        
-        await conn.close()
-        print("✅ Database migration completed successfully")
-        
-    except Exception as e:
-        print(f"❌ Database migration failed: {str(e)}")
-        sys.exit(1)
-
-asyncio.run(create_tables())
-'
-      
-      log "Starting table creation task..."
-      TABLE_TASK=$(aws ecs run-task \
-        --cluster "$CLUSTER_NAME" \
-        --task-definition "$TASK_DEF_ARN" \
-        --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_LIST],securityGroups=[${module.networking.ecs_security_group_id}],assignPublicIp=ENABLED}" \
-        --overrides "{\"containerOverrides\":[{\"name\":\"fastapi-app\",\"command\":[\"python\",\"-c\",\"$(echo "$PYTHON_SCRIPT" | sed 's/"/\\"/g')\"]}]}" \
-        --launch-type FARGATE \
-        --query 'tasks[0].taskArn' \
-        --output text 2>/dev/null || echo "FAILED")
-      
-      if [[ "$TABLE_TASK" != "FAILED" && "$TABLE_TASK" != "None" && -n "$TABLE_TASK" ]]; then
-        log "Table creation task started: $$(basename $${TABLE_TASK})"
-        log "⏳ Waiting for table creation to complete (timeout: 5 minutes)..."
-        
-        if aws ecs wait tasks-stopped --cluster "$CLUSTER_NAME" --tasks "$TABLE_TASK" --cli-read-timeout 300; then
-          # Check exit code
-          EXIT_CODE=$(aws ecs describe-tasks \
-            --cluster "$CLUSTER_NAME" \
-            --tasks "$TABLE_TASK" \
-            --query 'tasks[0].containers[0].exitCode' \
-            --output text 2>/dev/null || echo "1")
-          
-          if [[ "$EXIT_CODE" == "0" ]]; then
-            success "Database tables created successfully (fallback method)"
-            success "Tables: api_keys, download_jobs, alembic_version"
-          else
-            error "Table creation failed (exit code: $${EXIT_CODE})"
-            error "Database migration could not be completed"
-            exit 1
-          fi
-        else
-          error "Table creation task timed out"
-          error "Database migration could not be completed"
-          exit 1
-        fi
-      else
-        error "Could not start table creation task"
-        error "Database migration failed completely"
-        exit 1
-      fi
-    EOF
-  }
-}
