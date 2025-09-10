@@ -2,7 +2,8 @@ import asyncio
 import logging
 import os
 import tempfile
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any, Callable
 import uuid
@@ -14,6 +15,7 @@ from yt_dlp.utils import DownloadError, ExtractorError
 
 from app.core.config import settings
 from app.core.storage import init_storage
+from app.core.cookie_manager import CookieManager, CookieDownloadError, CookieValidationError, CookieExpiredError, CookieRateLimitError, CookieIntegrityError
 from app.models.database import DownloadJob
 
 logger = logging.getLogger(__name__)
@@ -69,27 +71,60 @@ class YouTubeDownloader:
     extraction, and format conversion.
     """
     
-    def __init__(self, storage_handler=None):
+    def __init__(self, storage_handler=None, cookie_manager=None):
         """
         Initialize the YouTube downloader.
         
         Args:
             storage_handler: Storage handler instance, defaults to global storage
+            cookie_manager: Cookie manager instance for authenticated downloads
         """
         self.storage = storage_handler or init_storage()
         self.temp_dir = Path(tempfile.gettempdir()) / "youtube_service"
         self.temp_dir.mkdir(exist_ok=True)
         
-        logger.info(f"YouTubeDownloader initialized with storage: {type(self.storage).__name__}")
+        # Initialize cookie manager for anti-bot protection
+        try:
+            self.cookie_manager = cookie_manager or CookieManager()
+            self.cookies_enabled = True
+            logger.info("Cookie manager initialized for authenticated downloads")
+        except Exception as e:
+            logger.warning(f"Cookie manager initialization failed: {e}")
+            self.cookie_manager = None
+            self.cookies_enabled = False
+        
+        # Cookie-related metrics
+        self.cookie_stats = {
+            'successful_downloads': 0,
+            'failed_downloads': 0,
+            'cookie_fallbacks': 0,
+            'rate_limit_hits': 0,
+            'integrity_failures': 0,
+            'consecutive_failures': 0,
+            'last_failure_time': None,
+            'alert_sent': False
+        }
+        
+        # Exponential backoff configuration
+        self.backoff_config = {
+            'initial_delay': 1.0,  # seconds
+            'max_delay': 300.0,    # 5 minutes max
+            'backoff_factor': 2.0,
+            'max_retries': 3
+        }
+        
+        logger.info(f"YouTubeDownloader initialized with storage: {type(self.storage).__name__}, cookies_enabled: {self.cookies_enabled}")
     
-    def _get_yt_dlp_options(
+    async def _get_yt_dlp_options(
         self, 
         output_path: str, 
         quality: str = "best",
         output_format: str = "mp4",
         extract_subtitles: bool = True,
         subtitle_langs: Optional[List[str]] = None,
-        progress_hook: Optional[Callable] = None
+        progress_hook: Optional[Callable] = None,
+        session_id: str = "default",
+        force_cookies: bool = False
     ) -> Dict[str, Any]:
         """
         Get yt-dlp options based on user preferences.
@@ -101,9 +136,11 @@ class YouTubeDownloader:
             extract_subtitles: Whether to extract subtitles
             subtitle_langs: List of subtitle languages to extract
             progress_hook: Progress callback function
+            session_id: Session identifier for rate limiting
+            force_cookies: Force enable cookies regardless of global setting
             
         Returns:
-            dict: yt-dlp options
+            dict: yt-dlp options with secure cookie integration
         """
         # Base options
         options = {
@@ -129,6 +166,53 @@ class YouTubeDownloader:
         # Format-specific options
         if output_format in ['mp4', 'mkv']:
             options['merge_output_format'] = output_format
+        
+        # Integrate secure cookie authentication (either globally enabled or force enabled)
+        should_use_cookies = (self.cookies_enabled and self.cookie_manager) or (force_cookies and self.cookie_manager)
+        if should_use_cookies:
+            try:
+                if force_cookies:
+                    logger.info(f"Force-enabling cookies for session: {session_id} (user requested)")
+                else:
+                    logger.info(f"Attempting to get secure cookies for session: {session_id}")
+                cookie_file_path = await self.cookie_manager.get_active_cookies(session_id)
+                options['cookiefile'] = cookie_file_path
+                logger.info(f"Successfully integrated cookies from: {cookie_file_path}")
+                
+            except CookieRateLimitError as e:
+                logger.warning(f"Cookie rate limit hit for session {session_id}: {e}")
+                self.cookie_stats['rate_limit_hits'] += 1
+                # Continue without cookies - will handle rate limiting at higher level
+                
+            except CookieIntegrityError as e:
+                logger.error(f"Cookie integrity validation failed: {e}")
+                self.cookie_stats['integrity_failures'] += 1
+                # Continue without cookies - integrity issues need manual intervention
+                
+            except (CookieDownloadError, CookieValidationError, CookieExpiredError) as e:
+                logger.warning(f"Cookie error for session {session_id}: {e}")
+                self.cookie_stats['failed_downloads'] += 1
+                
+                # Try backup cookies as fallback
+                try:
+                    logger.info("Attempting fallback to backup cookies")
+                    cookie_file_path = await self.cookie_manager.get_backup_cookies(session_id)
+                    options['cookiefile'] = cookie_file_path
+                    self.cookie_stats['cookie_fallbacks'] += 1
+                    logger.info(f"Successfully integrated backup cookies from: {cookie_file_path}")
+                    
+                except Exception as backup_error:
+                    logger.error(f"Backup cookies also failed: {backup_error}")
+                    # Continue without cookies
+                    
+            except Exception as e:
+                logger.error(f"Unexpected cookie error: {e}")
+                # Continue without cookies
+        else:
+            if force_cookies:
+                logger.warning("Cookie authentication forced but cookie manager unavailable")
+            else:
+                logger.info("Cookie authentication disabled or unavailable")
             
         return options
     
@@ -219,7 +303,8 @@ class YouTubeDownloader:
         audio_only: bool = False,
         include_transcription: bool = True,
         subtitle_languages: Optional[List[str]] = None,
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        use_cookies: bool = False
     ) -> Dict[str, Any]:
         """
         Download a YouTube video with specified options.
@@ -233,6 +318,7 @@ class YouTubeDownloader:
             include_transcription: Extract subtitles/transcriptions
             subtitle_languages: List of subtitle languages
             progress_callback: Progress update callback
+            use_cookies: Force enable cookies for this download
             
         Returns:
             dict: Download results with file paths and metadata
@@ -251,17 +337,27 @@ class YouTubeDownloader:
             if progress_callback:
                 progress_callback(10.0, "Preparing download...")
             
+            # Validate cookie status before download
+            cookie_status = await self._validate_cookie_status_for_download()
+            if progress_callback and cookie_status['message']:
+                progress_callback(15.0, cookie_status['message'])
+            
             # Create progress tracker
             progress_tracker = DownloadProgress(job_id, progress_callback)
             
-            # Configure yt-dlp options
-            options = self._get_yt_dlp_options(
+            # Configure yt-dlp options with secure cookie integration
+            if progress_callback and self.cookies_enabled:
+                progress_callback(20.0, "Configuring secure authentication...")
+            
+            options = await self._get_yt_dlp_options(
                 output_path=str(temp_output_dir),
                 quality=quality if not audio_only else "bestaudio",
                 output_format="mp3" if audio_only else output_format,
                 extract_subtitles=include_transcription,
                 subtitle_langs=subtitle_languages,
-                progress_hook=progress_tracker
+                progress_hook=progress_tracker,
+                session_id=job_id,  # Use job_id as session identifier
+                force_cookies=use_cookies
             )
             
             if audio_only:
@@ -271,14 +367,71 @@ class YouTubeDownloader:
                     'preferredcodec': 'mp3',
                 }]
             
-            # Download the video
+            # Download the video with enhanced error handling
+            download_success = False
             loop = asyncio.get_event_loop()
             
             def _download():
                 with yt_dlp.YoutubeDL(options) as ydl:
                     return ydl.download([url])
             
-            await loop.run_in_executor(None, _download)
+            try:
+                await loop.run_in_executor(None, _download)
+                download_success = True
+                
+                # Reset consecutive failures on success
+                if 'cookiefile' in options and self.cookies_enabled:
+                    self.cookie_stats['successful_downloads'] += 1
+                    self.cookie_stats['consecutive_failures'] = 0
+                    self.cookie_stats['alert_sent'] = False
+                    logger.info(f"Download succeeded with cookies for job {job_id}")
+                    
+            except (DownloadError, ExtractorError) as e:
+                error_msg = str(e)
+                
+                # Check if this is a cookie-related authentication error
+                if self._is_cookie_related_error(error_msg):
+                    logger.warning(f"Cookie-related download error detected: {error_msg}")
+                    
+                    # Track failure and check if alerts should be sent
+                    if 'cookiefile' in options:
+                        self.cookie_stats['failed_downloads'] += 1
+                        self.cookie_stats['consecutive_failures'] += 1
+                        self.cookie_stats['last_failure_time'] = time.time()
+                        
+                        # Send alert if consecutive failures exceed threshold
+                        await self._check_and_send_cookie_alerts()
+                        
+                        # Apply exponential backoff if multiple failures
+                        if self.cookie_stats['consecutive_failures'] > 1:
+                            backoff_delay = await self._calculate_exponential_backoff()
+                            if backoff_delay > 0:
+                                logger.info(f"Applying exponential backoff: {backoff_delay:.2f} seconds")
+                                await asyncio.sleep(backoff_delay)
+                    
+                    # Try without cookies as fallback
+                    if 'cookiefile' in options:
+                        logger.info("Attempting download without cookies as fallback")
+                        fallback_options = options.copy()
+                        del fallback_options['cookiefile']
+                        
+                        try:
+                            def _fallback_download():
+                                with yt_dlp.YoutubeDL(fallback_options) as ydl:
+                                    return ydl.download([url])
+                            
+                            await loop.run_in_executor(None, _fallback_download)
+                            download_success = True
+                            logger.info(f"Fallback download without cookies succeeded for job {job_id}")
+                            
+                        except Exception as fallback_error:
+                            logger.error(f"Fallback download also failed: {fallback_error}")
+                            raise
+                    else:
+                        raise
+                else:
+                    # Non-cookie related error, re-raise
+                    raise
             
             if progress_callback:
                 progress_callback(80.0, "Processing downloaded files...")
@@ -297,10 +450,15 @@ class YouTubeDownloader:
             if progress_callback:
                 progress_callback(100.0, "Download completed successfully!")
             
+            # Include cookie status in job metadata
+            cookie_metadata = self.get_cookie_statistics() if self.cookies_enabled else {'cookies_enabled': False}
+            
             return {
                 **result,
                 **storage_result,
-                'metadata': info
+                'metadata': info,
+                'cookie_status': cookie_metadata,
+                'download_method': 'with_cookies' if 'cookiefile' in options else 'without_cookies'
             }
             
         except Exception as e:
@@ -455,6 +613,316 @@ class YouTubeDownloader:
                 logger.debug(f"Cleaned up temporary directory: {temp_dir}")
         except Exception as e:
             logger.error(f"Error cleaning up temporary files: {e}")
+        
+        # Clean up cookie temporary files
+        if self.cookies_enabled and self.cookie_manager:
+            try:
+                await self.cookie_manager.cleanup_temporary_files(max_age_hours=1)
+            except Exception as e:
+                logger.warning(f"Failed to cleanup cookie temporary files: {e}")
+    
+    def _is_cookie_related_error(self, error_message: str) -> bool:
+        """
+        Check if the error message indicates a cookie-related authentication issue.
+        
+        Args:
+            error_message: Error message from yt-dlp
+            
+        Returns:
+            bool: True if error is likely cookie-related
+        """
+        cookie_error_patterns = [
+            'sign in',
+            'login required',
+            'authentication',
+            'unavailable',
+            'private video',
+            'age-restricted',
+            'content warning',
+            'verify your account',
+            '403',
+            'forbidden',
+            'blocked',
+            'rate limit',
+            'too many requests'
+        ]
+        
+        error_lower = error_message.lower()
+        return any(pattern in error_lower for pattern in cookie_error_patterns)
+    
+    def get_cookie_statistics(self) -> Dict[str, Any]:
+        """
+        Get cookie usage statistics for monitoring.
+        
+        Returns:
+            dict: Cookie usage statistics
+        """
+        total_attempts = (
+            self.cookie_stats['successful_downloads'] + 
+            self.cookie_stats['failed_downloads']
+        )
+        
+        success_rate = (
+            (self.cookie_stats['successful_downloads'] / total_attempts * 100) 
+            if total_attempts > 0 else 0
+        )
+        
+        return {
+            'cookies_enabled': self.cookies_enabled,
+            'total_download_attempts': total_attempts,
+            'successful_downloads': self.cookie_stats['successful_downloads'],
+            'failed_downloads': self.cookie_stats['failed_downloads'],
+            'cookie_fallbacks': self.cookie_stats['cookie_fallbacks'],
+            'rate_limit_hits': self.cookie_stats['rate_limit_hits'],
+            'integrity_failures': self.cookie_stats['integrity_failures'],
+            'success_rate_percent': round(success_rate, 2),
+            'fallback_rate_percent': round(
+                (self.cookie_stats['cookie_fallbacks'] / total_attempts * 100) 
+                if total_attempts > 0 else 0, 2
+            )
+        }
+    
+    async def _calculate_exponential_backoff(self) -> float:
+        """
+        Calculate exponential backoff delay based on consecutive failures.
+        
+        Returns:
+            float: Backoff delay in seconds
+        """
+        failures = self.cookie_stats['consecutive_failures']
+        if failures <= 1:
+            return 0.0
+        
+        # Calculate exponential backoff: initial_delay * (backoff_factor ^ (failures - 2))
+        delay = (self.backoff_config['initial_delay'] * 
+                (self.backoff_config['backoff_factor'] ** (failures - 2)))
+        
+        # Cap at max delay
+        delay = min(delay, self.backoff_config['max_delay'])
+        
+        logger.info(f"Calculated exponential backoff: {delay:.2f}s for {failures} consecutive failures")
+        return delay
+    
+    async def _check_and_send_cookie_alerts(self) -> None:
+        """
+        Check if administrator alerts should be sent for cookie issues.
+        """
+        consecutive_failures = self.cookie_stats['consecutive_failures']
+        alert_threshold = 5  # Send alert after 5 consecutive failures
+        
+        # Send alert if threshold exceeded and alert not already sent recently
+        if consecutive_failures >= alert_threshold and not self.cookie_stats['alert_sent']:
+            await self._send_cookie_refresh_alert()
+            self.cookie_stats['alert_sent'] = True
+            
+            logger.critical(
+                f"Cookie refresh alert sent after {consecutive_failures} consecutive failures"
+            )
+        
+        # Log warnings at different thresholds
+        if consecutive_failures == 3:
+            logger.warning("Cookie authentication showing signs of failure - monitoring closely")
+        elif consecutive_failures >= 10:
+            logger.critical(
+                f"Cookie system heavily degraded: {consecutive_failures} consecutive failures"
+            )
+    
+    async def _send_cookie_refresh_alert(self) -> None:
+        """
+        Send administrator alert when cookies need refresh.
+        
+        This method can be extended to integrate with alerting systems like:
+        - Email notifications
+        - Slack/Teams webhooks
+        - PagerDuty/Opsgenie
+        - CloudWatch alarms
+        """
+        alert_data = {
+            'alert_type': 'cookie_refresh_required',
+            'timestamp': datetime.now().isoformat(),
+            'consecutive_failures': self.cookie_stats['consecutive_failures'],
+            'last_failure_time': self.cookie_stats['last_failure_time'],
+            'total_failed_downloads': self.cookie_stats['failed_downloads'],
+            'success_rate': self.get_cookie_statistics()['success_rate_percent'],
+            'recommended_action': 'Update YouTube cookies using scripts/upload-cookies.py',
+            'urgency': 'high' if self.cookie_stats['consecutive_failures'] >= 10 else 'medium'
+        }
+        
+        # Log the alert (this could be extended to send to external systems)
+        logger.critical(
+            f"COOKIE REFRESH ALERT: {json.dumps(alert_data, indent=2)}"
+        )
+        
+        # TODO: Integrate with actual alerting systems
+        # Examples:
+        # await self._send_email_alert(alert_data)
+        # await self._send_slack_notification(alert_data)
+        # await self._trigger_cloudwatch_alarm(alert_data)
+        
+        # For now, we'll create a file-based alert that monitoring systems can detect
+        try:
+            alert_file = self.temp_dir / "cookie_refresh_alert.json"
+            async with aiofiles.open(alert_file, 'w') as f:
+                await f.write(json.dumps(alert_data, indent=2))
+            logger.info(f"Alert file created: {alert_file}")
+        except Exception as e:
+            logger.error(f"Failed to create alert file: {e}")
+    
+    async def _validate_cookie_status_for_download(self) -> Dict[str, Any]:
+        """
+        Validate cookie status before starting download and provide user-friendly status.
+        
+        Returns:
+            dict: Cookie validation status with user message
+        """
+        if not self.cookies_enabled or not self.cookie_manager:
+            return {
+                'status': 'disabled',
+                'message': "Downloading without authentication",
+                'details': "Cookie authentication is disabled"
+            }
+        
+        try:
+            # Check cookie freshness
+            freshness_status = await self.cookie_manager.validate_cookie_freshness()
+            
+            # Check for recent failures
+            consecutive_failures = self.cookie_stats['consecutive_failures']
+            
+            if consecutive_failures >= 5:
+                return {
+                    'status': 'degraded',
+                    'message': f"Cookie authentication degraded ({consecutive_failures} failures)",
+                    'details': "May fallback to non-authenticated download"
+                }
+            elif consecutive_failures >= 3:
+                return {
+                    'status': 'warning',
+                    'message': "Cookie authentication showing issues",
+                    'details': f"{consecutive_failures} recent failures detected"
+                }
+            elif freshness_status.get('warnings'):
+                return {
+                    'status': 'warning',
+                    'message': "Cookies may need refresh soon",
+                    'details': "; ".join(freshness_status['warnings'])
+                }
+            else:
+                return {
+                    'status': 'healthy',
+                    'message': "Using secure authentication",
+                    'details': "Cookie authentication active and healthy"
+                }
+                
+        except Exception as e:
+            logger.warning(f"Cookie status validation failed: {e}")
+            return {
+                'status': 'error',
+                'message': "Cookie validation failed, using fallback",
+                'details': str(e)
+            }
+    
+    def get_cookie_error_message(self, error: Exception, user_friendly: bool = True) -> str:
+        """
+        Generate user-friendly error messages for cookie-related issues.
+        
+        Args:
+            error: The exception that occurred
+            user_friendly: Whether to return user-friendly or technical message
+            
+        Returns:
+            str: Formatted error message
+        """
+        error_msg = str(error)
+        
+        if isinstance(error, CookieRateLimitError):
+            if user_friendly:
+                return "Download temporarily limited due to authentication rate limits. Please try again in a few minutes."
+            else:
+                return f"Cookie rate limit exceeded: {error_msg}"
+                
+        elif isinstance(error, CookieIntegrityError):
+            if user_friendly:
+                return "Authentication security check failed. Administrator has been notified."
+            else:
+                return f"Cookie integrity validation failed: {error_msg}"
+                
+        elif isinstance(error, CookieExpiredError):
+            if user_friendly:
+                return "Authentication credentials have expired. Download will attempt without authentication."
+            else:
+                return f"Cookie expired: {error_msg}"
+                
+        elif isinstance(error, CookieValidationError):
+            if user_friendly:
+                return "Authentication validation failed. Attempting alternative download method."
+            else:
+                return f"Cookie validation error: {error_msg}"
+                
+        elif isinstance(error, CookieDownloadError):
+            if user_friendly:
+                return "Unable to retrieve authentication credentials. Download will proceed without authentication."
+            else:
+                return f"Cookie download error: {error_msg}"
+        else:
+            # Generic error
+            if user_friendly:
+                return "Authentication issue encountered. Download will attempt alternative method."
+            else:
+                return f"Cookie error: {error_msg}"
+    
+    async def check_cookie_refresh_needed(self) -> Dict[str, Any]:
+        """
+        Check if cookie refresh is needed and provide notification data.
+        
+        Returns:
+            dict: Cookie refresh status and notification data
+        """
+        if not self.cookies_enabled or not self.cookie_manager:
+            return {'refresh_needed': False, 'reason': 'cookies_disabled'}
+        
+        try:
+            freshness_status = await self.cookie_manager.validate_cookie_freshness()
+            consecutive_failures = self.cookie_stats['consecutive_failures']
+            success_rate = self.get_cookie_statistics()['success_rate_percent']
+            
+            # Determine if refresh is needed based on multiple factors
+            refresh_needed = (
+                consecutive_failures >= 5 or  # Multiple recent failures
+                success_rate < 70 or  # Low success rate
+                freshness_status.get('rotation_due', False) or  # Scheduled rotation due
+                any('expiring' in warning.lower() for warning in freshness_status.get('warnings', []))
+            )
+            
+            if refresh_needed:
+                return {
+                    'refresh_needed': True,
+                    'urgency': 'high' if consecutive_failures >= 10 or success_rate < 50 else 'medium',
+                    'reasons': {
+                        'consecutive_failures': consecutive_failures,
+                        'success_rate': success_rate,
+                        'rotation_due': freshness_status.get('rotation_due', False),
+                        'warnings': freshness_status.get('warnings', [])
+                    },
+                    'recommended_action': 'Update YouTube cookies using scripts/upload-cookies.py',
+                    'next_check': datetime.now() + timedelta(hours=1)
+                }
+            else:
+                return {
+                    'refresh_needed': False,
+                    'status': 'healthy',
+                    'success_rate': success_rate,
+                    'next_check': datetime.now() + timedelta(hours=6)
+                }
+                
+        except Exception as e:
+            logger.error(f"Cookie refresh check failed: {e}")
+            return {
+                'refresh_needed': True,
+                'urgency': 'high',
+                'reason': 'check_failed',
+                'error': str(e)
+            }
     
     async def get_available_formats(self, url: str) -> List[Dict[str, Any]]:
         """

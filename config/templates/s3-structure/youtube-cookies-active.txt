@@ -1,0 +1,22 @@
+# Netscape HTTP Cookie File
+# This is a template for active YouTube cookies
+# Format: domain	flag	path	secure	expiration	name	value
+#
+# Instructions for use:
+# 1. Export cookies from your authenticated YouTube session in Netscape format
+# 2. Replace this template content with your actual cookies
+# 3. Upload to S3 using the admin script: scripts/upload-cookies.py
+#
+# Security Notes:
+# - This file contains sensitive authentication data
+# - Never commit actual cookies to version control  
+# - Rotate cookies regularly (recommended: every 30 days)
+# - Monitor for authentication failures indicating expired cookies
+#
+# Example format (DO NOT USE - template only):
+# .youtube.com	TRUE	/	TRUE	1234567890	session_token	TEMPLATE_VALUE_REPLACE_ME
+# .youtube.com	TRUE	/	FALSE	1234567890	VISITOR_INFO1_LIVE	TEMPLATE_VALUE_REPLACE_ME
+
+# Template entries - REPLACE WITH ACTUAL COOKIES
+.youtube.com	TRUE	/	TRUE	0	TEMPLATE_SESSION	REPLACE_WITH_ACTUAL_COOKIES
+.youtube.com	TRUE	/	FALSE	0	TEMPLATE_VISITOR	REPLACE_WITH_ACTUAL_COOKIES

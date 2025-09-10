@@ -24,6 +24,18 @@ pydantic-settings==2.1.0
 validators==0.22.0
 bleach==6.1.0
 
+# Cryptography for cookie encryption
+cryptography>=41.0.0
+
+# WebSocket Support
+websockets>=11.0.0
+
+# Enhanced performance for async operations
+uvloop>=0.18.0
+
+# Process and system monitoring
+psutil>=5.9.0
+
 # Video Processing
 ffmpeg-python==0.2.0
 
@@ -42,8 +54,6 @@ python-multipart==0.0.6
 
 # JSON Logging
 python-json-logger==2.0.7
-
-# WebSocket Support (included with FastAPI/uvicorn)
 
 # Additional utilities
 python-dateutil==2.8.2

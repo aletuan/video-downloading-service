@@ -87,7 +87,8 @@ async def start_download(
             "output_format": request.output_format.value,
             "audio_only": request.audio_only,
             "include_transcription": request.include_transcription,
-            "subtitle_languages": request.subtitle_languages
+            "subtitle_languages": request.subtitle_languages,
+            "use_cookies": request.use_cookies
         }
         
         # Start Celery task
@@ -403,7 +404,8 @@ async def retry_download(
             "output_format": job.output_format,
             "audio_only": job.audio_only,
             "include_transcription": job.include_transcription,
-            "subtitle_languages": job.subtitle_languages.split(",") if job.subtitle_languages else ["en"]
+            "subtitle_languages": job.subtitle_languages.split(",") if job.subtitle_languages else ["en"],
+            "use_cookies": False  # Default to False for retry - user can re-submit with cookies if needed
         }
         
         # Start Celery task

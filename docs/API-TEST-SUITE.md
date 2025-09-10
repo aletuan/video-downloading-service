@@ -351,7 +351,7 @@ aws s3 ls s3://${S3_BUCKET}/ --recursive
 
 **Expected S3 Structure:**
 
-```
+```text
 downloads/{job_id}/
 ├── Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster).mp4  (~11.7 MB)
 ├── subtitles/
@@ -368,9 +368,282 @@ downloads/{job_id}/
 
 ---
 
-## Phase 6: Additional API Tests
+## Phase 6: Cookie Management Tests
 
-### Test 11: List Download Jobs
+> **⚠️ Security Warning:** Cookie files contain sensitive authentication data. Never commit real cookie files to version control. The `.gitignore` file has been updated to exclude cookie files.
+
+### Test 12: Cookie Manager Health Check
+
+**Purpose:** Verify cookie management system is operational  
+**Expected Outcome:** 200 OK with cookie manager status in detailed health check
+
+```bash
+curl "http://${ALB_DNS}/health/detailed" -s | jq '.checks.cookie_manager'
+```
+
+**Expected Response (Healthy):**
+
+```json
+{
+  "status": "healthy",
+  "message": "Cookie manager is operational",
+  "details": {
+    "s3_bucket": "youtube-downloader-dev-secure-cookies-abc123def456",
+    "encryption_enabled": true,
+    "validation_enabled": true,
+    "metadata_available": true
+  }
+}
+```
+
+**Expected Response (Disabled):**
+
+```json
+{
+  "status": "disabled",
+  "message": "Cookie management is disabled"
+}
+```
+
+**Key Validation Points:**
+
+- If enabled: `status` should be `"healthy"`
+- `encryption_enabled` should always be `true`
+- `s3_bucket` should show the secure storage bucket name
+
+### Test 13: Cookie File Upload & Validation
+
+**Purpose:** Test secure cookie upload system using the dedicated script  
+**Expected Outcome:** Successful validation and upload of test cookie file
+
+**Prerequisites:**
+
+```bash
+# Use existing test cookie file from repository
+# The scripts/test-cookies.txt file already contains comprehensive test cookies
+# You can inspect the existing test cookies (36+ cookies from multiple domains):
+cat scripts/test-cookies.txt
+
+# File contains cookies for:
+# - .youtube.com (YouTube-specific cookies)
+# - .google.com (Google authentication cookies) 
+# - chromewebstore.google.com (Chrome Web Store cookies)
+```
+
+**Validation Only (Safe Test):**
+
+```bash
+# Test validation without uploading
+python scripts/upload-cookies.py --validate-only scripts/test-cookies.txt
+```
+
+**Expected Output:**
+
+```text
+Validating cookie file: scripts/test-cookies.txt
+Validation Results:
+  Format: netscape
+  Valid: True
+  Cookie Count: 3
+  File Size: 234 bytes
+  Domains: .google.com, .youtube.com, youtube.com
+  Warnings: 0
+
+✅ Validation completed (upload skipped)
+```
+
+**Full Upload Test (After Deployment):**
+
+```bash
+# Upload test cookies to secure S3 storage
+python scripts/upload-cookies.py --source "API Test Suite" \
+    --description "Test cookies for integration testing" \
+    scripts/test-cookies.txt
+```
+
+**Expected Output:**
+
+```text
+Uploading cookies...
+Upload Verification:
+  Success: True
+  Active Cookies Present: True
+  Metadata Present: True
+  Decryption Successful: True
+  Cookie Count: 3
+
+✅ Cookie upload completed successfully!
+🧹 Cleaned up 0 old backup files
+```
+
+### Test 14: List Existing Cookies
+
+**Purpose:** Verify cookie management system shows uploaded cookies  
+**Expected Outcome:** Display current cookie information
+
+```bash
+python scripts/upload-cookies.py --list-existing
+```
+
+**Expected Output:**
+
+```text
+Existing Cookies Information:
+==================================================
+Active Cookies:
+  Last Modified: 2025-01-09T14:30:45+00:00
+  Size: 234 bytes
+
+Metadata:
+  Upload Date: 2025-01-09T14:30:45.123456
+  Cookie Count: 3
+  Source: API Test Suite
+  Uploader: testuser
+
+Recent Backups (0 of 0):
+```
+
+### Test 15: Cookie-Enabled Video Download
+
+**Purpose:** Test video download using cookie authentication for enhanced access  
+**Expected Outcome:** Successful download with cookie authentication
+
+```bash
+# Test download that may require cookies (age-restricted or region-locked)
+curl -X POST "http://${ALB_DNS}/api/v1/download" \
+     -H "Content-Type: application/json" \
+     -H "X-API-Key: ${DOWNLOAD_KEY}" \
+     -d '{
+       "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+       "quality": "720p",
+       "output_format": "mp4",
+       "use_cookies": true
+     }' -s | jq .
+```
+
+**Expected Response:**
+
+```json
+{
+  "job_id": "abc123-def4-5678-9012-345678901234",
+  "status": "queued",
+  "message": "Download job queued successfully with cookie authentication",
+  "estimated_time": 300,
+  "cookie_enabled": true
+}
+```
+
+### Test 16: Cookie Manager Status Endpoint
+
+**Purpose:** Test administrative cookie status endpoint  
+**Expected Outcome:** Detailed cookie system status
+
+```bash
+curl "http://${ALB_DNS}/api/v1/admin/cookies/status" \
+     -H "X-API-Key: ${ADMIN_KEY}" -s | jq .
+```
+
+**Expected Response:**
+
+```json
+{
+  "cookie_manager_status": "operational",
+  "active_cookies": {
+    "present": true,
+    "last_updated": "2025-01-09T14:30:45.123456",
+    "cookie_count": 3,
+    "expires_earliest": "2024-12-31T23:59:59",
+    "domains": [".google.com", ".youtube.com", "youtube.com"]
+  },
+  "backup_cookies": {
+    "present": true,
+    "backup_count": 1
+  },
+  "cache_status": {
+    "active_cached": false,
+    "backup_cached": false,
+    "cache_ttl_seconds": 3600
+  },
+  "rate_limiting": {
+    "requests_per_window": 10,
+    "window_seconds": 60,
+    "active_identifiers": 0
+  }
+}
+```
+
+### Test 17: Cookie Fallback Testing
+
+**Purpose:** Test cookie fallback mechanisms  
+**Expected Outcome:** System gracefully handles cookie failures
+
+```bash
+# Temporarily disable/corrupt cookies by renaming in S3
+aws s3 mv s3://${COOKIE_BUCKET}/cookies/youtube-cookies-active.txt \
+    s3://${COOKIE_BUCKET}/cookies/youtube-cookies-active.txt.disabled
+
+# Test download without cookies
+curl -X POST "http://${ALB_DNS}/api/v1/download" \
+     -H "Content-Type: application/json" \
+     -H "X-API-Key: ${DOWNLOAD_KEY}" \
+     -d '{
+       "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+       "quality": "720p",
+       "use_cookies": true
+     }' -s | jq '.status, .message'
+
+# Restore cookies
+aws s3 mv s3://${COOKIE_BUCKET}/cookies/youtube-cookies-active.txt.disabled \
+    s3://${COOKIE_BUCKET}/cookies/youtube-cookies-active.txt
+```
+
+**Expected Behavior:**
+
+- Download should still proceed but with warning about cookie unavailability
+- System should not crash or fail completely
+
+### Test 18: Cookie Rotation Testing
+
+**Purpose:** Test cookie rotation functionality  
+**Expected Outcome:** Successful rotation from backup to active
+
+```bash
+# First, upload a backup cookie set (different from active)
+cat > scripts/backup-cookies.txt << 'EOF'
+# Backup cookie set
+.youtube.com TRUE / FALSE 1735689600 VISITOR_INFO1_LIVE backup123
+EOF
+
+python scripts/upload-cookies.py --source "Backup Test" scripts/backup-cookies.txt
+
+# Test manual rotation via API (if endpoint exists)
+curl -X POST "http://${ALB_DNS}/api/v1/admin/cookies/rotate" \
+     -H "X-API-Key: ${ADMIN_KEY}" -s | jq .
+```
+
+**Expected Response:**
+
+```json
+{
+  "status": "success",
+  "timestamp": "2025-01-09T14:35:00.000000",
+  "actions": [
+    "validated_backup_cookies",
+    "archived_active_cookies", 
+    "promoted_backup_to_active",
+    "cleared_cache",
+    "updated_metadata"
+  ],
+  "next_rotation": "2025-02-08T14:35:00.000000",
+  "warning": "New backup cookies should be uploaded soon"
+}
+```
+
+---
+
+## Phase 7: Additional API Tests
+
+### Test 19: List Download Jobs
 
 **Purpose:** Test job listing functionality  
 **Expected Outcome:** 200 OK with paginated job list
@@ -428,6 +701,24 @@ curl "http://${ALB_DNS}/api/v1/jobs" \
 **Cause:** Admin keys already exist in database  
 **Solution:** Normal behavior after initial setup - use existing admin key
 
+#### 6. Cookie Manager Health Check Failed
+
+**Symptoms:** Cookie manager shows "unhealthy" status in detailed health check  
+**Cause:** S3 bucket access issues, missing encryption key, or AWS credentials  
+**Solution:** Check S3 bucket permissions, verify COOKIE_ENCRYPTION_KEY environment variable
+
+#### 7. Cookie Upload Script Fails
+
+**Symptoms:** "COOKIE_S3_BUCKET environment variable required" error  
+**Cause:** Missing cookie S3 bucket configuration  
+**Solution:** Set environment variables or use --bucket parameter with upload script
+
+#### 8. Cookie Files Committed to Git
+
+**Symptoms:** Git shows cookie files in tracked changes  
+**Cause:** Cookie files not properly excluded from version control  
+**Solution:** Verify `.gitignore` includes cookie file patterns, remove from git if committed
+
 ---
 
 ## Performance Benchmarks
@@ -440,6 +731,8 @@ curl "http://${ALB_DNS}/api/v1/jobs" \
 - **Video Info Extraction:** 20-30 seconds (may timeout at ALB)
 - **Video Download (720p):** 20-60 seconds depending on video length
 - **Job Status Check:** < 1 second
+- **Cookie Upload/Validation:** 1-3 seconds
+- **Cookie Manager Operations:** < 1 second
 
 ### Expected File Sizes (720p MP4)
 
@@ -460,9 +753,12 @@ set -e
 # Configuration
 ALB_DNS="${ALB_DNS:-youtube-do-dev-alb-ff494fc6-1992147449.us-east-1.elb.amazonaws.com}"
 S3_BUCKET="${S3_BUCKET:-youtube-downloader-dev-videos-dc6abb7746a3ee7b}"
+COOKIE_BUCKET="${COOKIE_BUCKET:-youtube-downloader-dev-secure-cookies-abc123def456}"
 
 echo "Starting YouTube Downloader API Test Suite"
 echo "ALB DNS: $ALB_DNS"
+echo "S3 Bucket: $S3_BUCKET"
+echo "Cookie Bucket: $COOKIE_BUCKET"
 
 # Test 1: Health Check
 echo "Test 1: Health Check"
@@ -471,6 +767,18 @@ curl -s "http://$ALB_DNS/health" | jq -r '.status // "FAILED"'
 # Test 2: Bootstrap Status  
 echo "Test 2: Bootstrap Status"
 curl -s "http://$ALB_DNS/api/v1/bootstrap/status" | jq -r '.status // "FAILED"'
+
+# Test 3: Cookie Manager Health
+echo "Test 3: Cookie Manager Health"
+curl -s "http://$ALB_DNS/health/detailed" | jq -r '.checks.cookie_manager.status // "DISABLED"'
+
+# Test 4: Cookie Validation (if test file exists)
+if [ -f "scripts/test-cookies.txt" ]; then
+    echo "Test 4: Cookie Validation"
+    python scripts/upload-cookies.py --validate-only scripts/test-cookies.txt | grep -q "✅" && echo "PASSED" || echo "FAILED"
+else
+    echo "Test 4: Cookie Validation - SKIPPED (no test file)"
+fi
 
 # Add more automated tests as needed...
 
@@ -487,13 +795,16 @@ Run these commands periodically to verify system health:
 
 ```bash
 # Quick health verification
-curl -s "http://${ALB_DNS}/health/detailed" | jq '.checks.database.status, .checks.storage.storage_type'
+curl -s "http://${ALB_DNS}/health/detailed" | jq '.checks.database.status, .checks.storage.storage_type, .checks.cookie_manager.status'
 
 # S3 storage verification  
 aws s3 ls s3://${S3_BUCKET}/ --recursive | wc -l
 
 # Recent download jobs
 curl -s "http://${ALB_DNS}/api/v1/jobs?per_page=5" -H "X-API-Key: ${ADMIN_KEY}" | jq '.total'
+
+# Cookie system status (if enabled)
+python scripts/upload-cookies.py --list-existing | grep -E "(Active Cookies|Cookie Count)" || echo "Cookies disabled or not configured"
 ```
 
 ### Log Monitoring
@@ -508,6 +819,37 @@ aws logs tail /ecs/youtube-downloader-dev-worker --follow
 
 ---
 
-**Last Updated:** September 6, 2025  
-**Test Suite Version:** 1.0  
-**Compatible with:** YouTube Downloader Service v1.0
+## Security Notes for Cookie Testing
+
+### Important Cookie Security Guidelines
+
+1. **Never commit real cookie files to version control**
+   - Use only test/dummy cookies for documentation examples
+   - Real cookies contain sensitive authentication tokens
+   - The `.gitignore` file excludes common cookie file patterns
+
+2. **Cookie file handling best practices**
+   - Store real cookies outside the repository
+   - Use descriptive but non-sensitive names for test files
+   - Rotate cookies regularly in production environments
+   - Monitor cookie expiration dates and update proactively
+
+3. **Testing with production cookies**
+   - Copy real cookies to a secure location outside the repo
+   - Use the `--validate-only` flag first to test without uploading
+   - Test cookie functionality in a staging environment before production
+   - Always verify cookie upload success with the verification steps
+
+4. **Environment variables for cookie testing**
+
+   ```bash
+   export COOKIE_S3_BUCKET="youtube-downloader-dev-secure-cookies-xxxxx"
+   export COOKIE_ENCRYPTION_KEY="your-encryption-key-here"
+   export AWS_REGION="us-east-1"
+   ```
+
+---
+
+**Last Updated:** January 9, 2025  
+**Test Suite Version:** 1.1  
+**Compatible with:** YouTube Downloader Service v1.0 with Cookie Management

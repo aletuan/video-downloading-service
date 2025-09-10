@@ -1,0 +1,33 @@
+# Netscape HTTP Cookie File - BACKUP
+# This is a template for backup YouTube cookies
+# Used as fallback when active cookies fail
+# Format: domain	flag	path	secure	expiration	name	value
+#
+# Backup Cookie Strategy:
+# 1. Keep previous working cookies as backup
+# 2. Automatically fallback to backup on active cookie failure
+# 3. Rotate backup cookies when updating active cookies
+# 4. Test backup cookies periodically to ensure validity
+#
+# Usage by system:
+# - Automatically used when active cookies return authentication errors
+# - Provides seamless fallback during cookie rotation
+# - Prevents download service interruption
+#
+# Maintenance:
+# - Update when rotating active cookies
+# - Verify backup cookies work before deploying new active cookies
+# - Remove expired backup cookies during rotation
+#
+# Security Notes:
+# - Contains sensitive authentication data
+# - Same security precautions as active cookies
+# - Monitor backup cookie usage for security analysis
+#
+# Example format (DO NOT USE - template only):
+# .youtube.com	TRUE	/	TRUE	1234567890	session_token	BACKUP_TEMPLATE_VALUE
+# .youtube.com	TRUE	/	FALSE	1234567890	VISITOR_INFO1_LIVE	BACKUP_TEMPLATE_VALUE
+
+# Template entries - REPLACE WITH ACTUAL BACKUP COOKIES
+.youtube.com	TRUE	/	TRUE	0	BACKUP_SESSION	REPLACE_WITH_ACTUAL_BACKUP_COOKIES
+.youtube.com	TRUE	/	FALSE	0	BACKUP_VISITOR	REPLACE_WITH_ACTUAL_BACKUP_COOKIES

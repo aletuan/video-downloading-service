@@ -10,6 +10,13 @@ services:
       - DATABASE_URL=postgresql+asyncpg://postgres:password@db:5432/youtube_service
       - REDIS_URL=redis://redis:6379/0
       - BOOTSTRAP_SETUP_TOKEN=dev-bootstrap-token-12345
+      # Cookie Management Configuration (disabled for localhost development)
+      - COOKIE_S3_BUCKET=
+      - COOKIE_ENCRYPTION_KEY=dev-cookie-encryption-key-12345678901234567890123456
+      - COOKIE_REFRESH_INTERVAL=3600
+      - COOKIE_VALIDATION_ENABLED=false
+      - COOKIE_BACKUP_COUNT=3
+      - COOKIE_TEMP_DIR=/tmp/cookie_temp
     volumes:
       - ./downloads:/app/downloads
       - .env:/app/.env
@@ -48,6 +55,13 @@ services:
       - ENVIRONMENT=localhost
       - DATABASE_URL=postgresql+asyncpg://postgres:password@db:5432/youtube_service
       - REDIS_URL=redis://redis:6379/0
+      # Cookie Management Configuration (disabled for localhost development)
+      - COOKIE_S3_BUCKET=
+      - COOKIE_ENCRYPTION_KEY=dev-cookie-encryption-key-12345678901234567890123456
+      - COOKIE_REFRESH_INTERVAL=3600
+      - COOKIE_VALIDATION_ENABLED=false
+      - COOKIE_BACKUP_COUNT=3
+      - COOKIE_TEMP_DIR=/tmp/cookie_temp
     volumes:
       - ./downloads:/app/downloads
       - .env:/app/.env
