@@ -123,7 +123,8 @@ class YouTubeDownloader:
         extract_subtitles: bool = True,
         subtitle_langs: Optional[List[str]] = None,
         progress_hook: Optional[Callable] = None,
-        session_id: str = "default"
+        session_id: str = "default",
+        force_cookies: bool = False
     ) -> Dict[str, Any]:
         """
         Get yt-dlp options based on user preferences.
@@ -136,6 +137,7 @@ class YouTubeDownloader:
             subtitle_langs: List of subtitle languages to extract
             progress_hook: Progress callback function
             session_id: Session identifier for rate limiting
+            force_cookies: Force enable cookies regardless of global setting
             
         Returns:
             dict: yt-dlp options with secure cookie integration
@@ -165,10 +167,14 @@ class YouTubeDownloader:
         if output_format in ['mp4', 'mkv']:
             options['merge_output_format'] = output_format
         
-        # Integrate secure cookie authentication
-        if self.cookies_enabled and self.cookie_manager:
+        # Integrate secure cookie authentication (either globally enabled or force enabled)
+        should_use_cookies = (self.cookies_enabled and self.cookie_manager) or (force_cookies and self.cookie_manager)
+        if should_use_cookies:
             try:
-                logger.info(f"Attempting to get secure cookies for session: {session_id}")
+                if force_cookies:
+                    logger.info(f"Force-enabling cookies for session: {session_id} (user requested)")
+                else:
+                    logger.info(f"Attempting to get secure cookies for session: {session_id}")
                 cookie_file_path = await self.cookie_manager.get_active_cookies(session_id)
                 options['cookiefile'] = cookie_file_path
                 logger.info(f"Successfully integrated cookies from: {cookie_file_path}")
@@ -203,7 +209,10 @@ class YouTubeDownloader:
                 logger.error(f"Unexpected cookie error: {e}")
                 # Continue without cookies
         else:
-            logger.info("Cookie authentication disabled or unavailable")
+            if force_cookies:
+                logger.warning("Cookie authentication forced but cookie manager unavailable")
+            else:
+                logger.info("Cookie authentication disabled or unavailable")
             
         return options
     
@@ -294,7 +303,8 @@ class YouTubeDownloader:
         audio_only: bool = False,
         include_transcription: bool = True,
         subtitle_languages: Optional[List[str]] = None,
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        use_cookies: bool = False
     ) -> Dict[str, Any]:
         """
         Download a YouTube video with specified options.
@@ -308,6 +318,7 @@ class YouTubeDownloader:
             include_transcription: Extract subtitles/transcriptions
             subtitle_languages: List of subtitle languages
             progress_callback: Progress update callback
+            use_cookies: Force enable cookies for this download
             
         Returns:
             dict: Download results with file paths and metadata
@@ -345,7 +356,8 @@ class YouTubeDownloader:
                 extract_subtitles=include_transcription,
                 subtitle_langs=subtitle_languages,
                 progress_hook=progress_tracker,
-                session_id=job_id  # Use job_id as session identifier
+                session_id=job_id,  # Use job_id as session identifier
+                force_cookies=use_cookies
             )
             
             if audio_only:

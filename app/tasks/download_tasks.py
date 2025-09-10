@@ -148,6 +148,7 @@ def process_download(self, job_id: str, url: str, options: dict):
             audio_only = options.get('audio_only', False)
             include_transcription = options.get('include_transcription', True)
             subtitle_languages = options.get('subtitle_languages', ['en'])
+            use_cookies = options.get('use_cookies', False)
             
             # Start download
             result = await downloader.download_video(
@@ -158,7 +159,8 @@ def process_download(self, job_id: str, url: str, options: dict):
                 audio_only=audio_only,
                 include_transcription=include_transcription,
                 subtitle_languages=subtitle_languages,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                use_cookies=use_cookies
             )
             
             # Update database with results using sync operation

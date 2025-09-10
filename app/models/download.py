@@ -70,6 +70,12 @@ class DownloadRequest(BaseModel, SecurityValidationMixin):
         example=["en", "es", "fr"]
     )
     
+    use_cookies: bool = Field(
+        default=False,
+        description="Use stored authentication cookies to bypass YouTube bot detection",
+        example=True
+    )
+    
     @field_validator('url')
     @classmethod
     def validate_youtube_url(cls, v):
