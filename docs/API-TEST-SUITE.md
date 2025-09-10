@@ -419,15 +419,15 @@ curl "http://${ALB_DNS}/health/detailed" -s | jq '.checks.cookie_manager'
 **Prerequisites:**
 
 ```bash
-# Create test cookie file (example - use your own cookies)
-cat > scripts/test-cookies.txt << 'EOF'
-# Netscape HTTP Cookie File
-# This is a generated file! Do not edit.
+# Use existing test cookie file from repository
+# The scripts/test-cookies.txt file already contains comprehensive test cookies
+# You can inspect the existing test cookies (36+ cookies from multiple domains):
+cat scripts/test-cookies.txt
 
-.youtube.com TRUE / FALSE 1735689600 VISITOR_INFO1_LIVE test123abc456
-.google.com TRUE / TRUE 1735689600 SIDCC def789ghi012
-youtube.com FALSE / FALSE 0 PREF session_cookie_123
-EOF
+# File contains cookies for:
+# - .youtube.com (YouTube-specific cookies)
+# - .google.com (Google authentication cookies) 
+# - chromewebstore.google.com (Chrome Web Store cookies)
 ```
 
 **Validation Only (Safe Test):**
