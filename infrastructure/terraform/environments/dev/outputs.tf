@@ -149,6 +149,27 @@ output "redis_connection_info" {
   }
 }
 
+# Secure Storage Outputs (Cookie Management)
+output "secure_storage_bucket_name" {
+  description = "Secure S3 bucket name for cookie management"
+  value       = module.secure_storage.secure_config_bucket_name
+}
+
+output "secure_storage_bucket_arn" {
+  description = "Secure S3 bucket ARN for cookie management"
+  value       = module.secure_storage.secure_config_bucket_arn
+}
+
+output "cookie_directory_path" {
+  description = "S3 path for cookie files"
+  value       = module.secure_storage.cookie_directory_path
+}
+
+output "secure_storage_config" {
+  description = "Complete secure storage configuration"
+  value       = module.secure_storage.s3_config
+}
+
 # Systems Manager Parameters
 output "parameter_store_keys" {
   description = "Systems Manager parameter names"
@@ -157,6 +178,7 @@ output "parameter_store_keys" {
     redis_url        = aws_ssm_parameter.redis_url.name
     s3_bucket_name   = module.storage.s3_bucket_name_parameter
     s3_bucket_region = module.storage.s3_bucket_region_parameter
+    cookie_encryption_key = aws_ssm_parameter.cookie_encryption_key.name
   }
 }
 

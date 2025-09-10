@@ -254,12 +254,16 @@ resource "aws_ecs_task_definition" "app" {
           value = var.s3_bucket_name
         },
         {
-          name  = "COOKIE_S3_BUCKET_PREFIX"
-          value = "${var.project_name}-${var.environment}-secure-config"
+          name  = "COOKIE_S3_BUCKET"
+          value = var.secure_storage_config.bucket_name
         },
         {
           name  = "AWS_REGION"
           value = data.aws_region.current.name
+        },
+        {
+          name  = "ENABLE_COOKIE_MANAGEMENT"
+          value = "true"
         }
       ]
       
@@ -338,12 +342,16 @@ resource "aws_ecs_task_definition" "worker" {
           value = var.s3_bucket_name
         },
         {
-          name  = "COOKIE_S3_BUCKET_PREFIX"
-          value = "${var.project_name}-${var.environment}-secure-config"
+          name  = "COOKIE_S3_BUCKET"
+          value = var.secure_storage_config.bucket_name
         },
         {
           name  = "AWS_REGION"
           value = data.aws_region.current.name
+        },
+        {
+          name  = "ENABLE_COOKIE_MANAGEMENT"
+          value = "true"
         }
       ]
       
